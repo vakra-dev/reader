@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext"],
+    "baseUrl": "..",
+    "paths": {
+      "@vakra-dev/reader": ["./src/index.ts"]
+    },
+    "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "include": [
+    "basic/**/*.ts",
+    "ai-tools/**/*.ts",
+    "production/**/*.ts",
+    "deployment/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
+}

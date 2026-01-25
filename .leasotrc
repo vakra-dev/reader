@@ -1,0 +1,4 @@
+{
+  "tags": ["TODO", "FIXME", "HACK", "XXX", "BUG", "OPTIMIZE", "REVIEW"],
+  "ignore": ["node_modules/**", "dist/**"]
+}

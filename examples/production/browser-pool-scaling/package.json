@@ -1,0 +1,20 @@
+{
+  "name": "browser-pool-scaling-example",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser pool scaling example with metrics and health monitoring",
+  "type": "module",
+  "scripts": {
+    "start": "npx tsx src/index.ts"
+  },
+  "dependencies": {
+    "@vakra-dev/reader": "file:../../..",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.6",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

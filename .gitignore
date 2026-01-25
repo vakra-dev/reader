@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Package manager locks
+# Note: package-lock.json is tracked for reproducible builds
+yarn.lock
+
+# Bun
+bun.lockb
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Hero/Ulixee session data
+.ulixee/
+
+# Claude Code context
+CLAUDE.md
+
+# Deployment configs (contain sensitive data)
+deploy/

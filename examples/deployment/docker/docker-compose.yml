@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  reader:
+    # Force x86_64 for Chrome compatibility (Hero bundles x86_64 Chromium)
+    platform: linux/amd64
+    build:
+      context: ../../..
+      dockerfile: examples/deployment/docker/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - NODE_ENV=production
+      # Optional: Proxy configuration
+      # - PROXY_URL=http://user:pass@proxy:8080
+    restart: unless-stopped
+    # Increase shared memory for Chrome
+    shm_size: '2gb'
+    # Security options for Chrome
+    security_opt:
+      - seccomp:unconfined
+    # Disable Chrome sandbox (redundant with noChromeSandbox but helps with some setups)
+    cap_add:
+      - SYS_ADMIN
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

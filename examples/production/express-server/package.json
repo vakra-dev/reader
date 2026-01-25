@@ -1,0 +1,24 @@
+{
+  "name": "reader-express-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Express server example for @vakra-dev/reader",
+  "type": "module",
+  "scripts": {
+    "start": "npx tsx src/index.ts",
+    "dev": "npx tsx --watch src/index.ts"
+  },
+  "dependencies": {
+    "@ulixee/hero": "^2.0.0-alpha.34",
+    "@ulixee/hero-core": "^2.0.0-alpha.34",
+    "@ulixee/net": "^2.0.0-alpha.29",
+    "@vakra-dev/reader": "^1.0.0",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.6",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

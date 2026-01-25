@@ -1,0 +1,28 @@
+{
+  "name": "job-queue-bullmq-example",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Async job queue example using BullMQ and Redis",
+  "type": "module",
+  "scripts": {
+    "start": "npx tsx src/index.ts",
+    "worker": "npx tsx src/worker.ts",
+    "dev": "concurrently \"npm run start\" \"npm run worker\""
+  },
+  "dependencies": {
+    "@vakra-dev/reader": "file:../../..",
+    "@ulixee/hero": "^2.0.0-alpha.34",
+    "@ulixee/hero-core": "^2.0.0-alpha.34",
+    "@ulixee/net": "^2.0.0-alpha.29",
+    "bullmq": "^5.0.0",
+    "express": "^4.18.2",
+    "ioredis": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.6",
+    "concurrently": "^8.2.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
