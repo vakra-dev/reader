@@ -1,8 +1,4 @@
-import Hero from "@ulixee/hero";
 import pLimit from "p-limit";
-import type { IBrowserPool } from "./browser/types";
-import { detectChallenge } from "./cloudflare/detector";
-import { waitForChallengeResolution } from "./cloudflare/handler";
 import { htmlToMarkdown } from "./formatters/markdown";
 import { cleanContent } from "./utils/content-cleaner";
 import { extractMetadata } from "./utils/metadata-extractor";
@@ -16,6 +12,7 @@ import {
   type BatchMetadata,
   type ProxyMetadata,
 } from "./types";
+import { EngineOrchestrator, AllEnginesFailedError } from "./engines/index.js";
 
 /**
  * Scraper class with built-in concurrency support
@@ -40,7 +37,6 @@ import {
  */
 export class Scraper {
   private options: Required<ScrapeOptions>;
-  private pool: IBrowserPool;
   private logger = createLogger("scraper");
   private robotsCache: Map<string, RobotsRules | null> = new Map();
 
@@ -51,11 +47,8 @@ export class Scraper {
       ...options,
     } as Required<ScrapeOptions>;
 
-    // Pool must be provided by client
-    if (!options.pool) {
-      throw new Error("Browser pool must be provided. Use ReaderClient for automatic pool management.");
-    }
-    this.pool = options.pool;
+    // Pool is required for Hero engine (but may not be needed if using http/tlsclient only)
+    // The orchestrator will check availability when needed
   }
 
   /**
@@ -147,75 +140,7 @@ export class Scraper {
   }
 
   /**
-   * Wait for the final page to load after any Cloudflare redirects
-   * Cloudflare often does silent redirects even when bypassed, we need to ensure
-   * we're on the actual content page before scraping.
-   */
-  private async waitForFinalPage(hero: Hero, originalUrl: string, verbose: boolean): Promise<void> {
-    const maxWaitMs = 15000;
-    const startTime = Date.now();
-    const log = (msg: string) => verbose && this.logger.info(msg);
-
-    // Wait for any pending navigation to complete
-    try {
-      await hero.waitForLoad("AllContentLoaded", { timeoutMs: maxWaitMs });
-    } catch {
-      // Timeout is OK
-    }
-
-    // Check if URL changed (Cloudflare redirect)
-    // Normalize URLs by removing trailing slashes for comparison
-    let currentUrl = await hero.url;
-    const normalizeUrl = (url: string) => url.replace(/\/+$/, "");
-    const urlChanged = normalizeUrl(currentUrl) !== normalizeUrl(originalUrl);
-
-    if (urlChanged || currentUrl.includes("__cf_chl")) {
-      log(`Cloudflare redirect detected: ${originalUrl} → ${currentUrl}`);
-
-      // Wait for the redirect to complete and new page to load
-      // Poll until URL stabilizes and page is loaded
-      let lastUrl = currentUrl;
-      let stableCount = 0;
-
-      while (Date.now() - startTime < maxWaitMs) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-
-        try {
-          currentUrl = await hero.url;
-
-          // URL is stable if it hasn't changed for 2 consecutive checks
-          if (currentUrl === lastUrl) {
-            stableCount++;
-            if (stableCount >= 2) {
-              break;
-            }
-          } else {
-            stableCount = 0;
-            lastUrl = currentUrl;
-            log(`URL changed to: ${currentUrl}`);
-          }
-        } catch {
-          // Error getting URL, continue waiting
-        }
-      }
-
-      // Final wait for page content to render
-      try {
-        await hero.waitForLoad("AllContentLoaded", { timeoutMs: 10000 });
-      } catch {
-        // Timeout OK
-      }
-    }
-
-    // Final stabilization
-    await hero.waitForPaintingStable();
-
-    // Buffer for JS execution and dynamic content loading
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-  }
-
-  /**
-   * Scrape a single URL
+   * Scrape a single URL using the engine orchestrator
    */
   private async scrapeSingleUrl(url: string, index: number): Promise<WebsiteScrapeResult | null> {
     const startTime = Date.now();
@@ -227,137 +152,111 @@ export class Scraper {
     }
 
     try {
-      return await this.pool.withBrowser(async (hero: Hero) => {
-        // Navigate to URL
-        await hero.goto(url, { timeoutMs: this.options.timeoutMs });
+      // Create orchestrator with configured engines
+      const orchestrator = new EngineOrchestrator({
+        engines: this.options.engines,
+        skipEngines: this.options.skipEngines,
+        forceEngine: this.options.forceEngine,
+        logger: this.logger,
+        verbose: this.options.verbose,
+      });
 
-        // Wait for initial page load
-        try {
-          await hero.waitForLoad("DomContentLoaded", { timeoutMs: this.options.timeoutMs });
-        } catch {
-          // Timeout is OK, continue anyway
-        }
-        await hero.waitForPaintingStable();
+      // Use orchestrator to fetch HTML
+      const engineResult = await orchestrator.scrape({
+        url,
+        options: this.options,
+        logger: this.logger,
+      });
 
-        // Detect and handle Cloudflare challenge
-        const initialUrl = await hero.url;
-        const detection = await detectChallenge(hero);
+      if (this.options.verbose) {
+        this.logger.info(
+          `[scraper] ${url} scraped with ${engineResult.engine} engine in ${engineResult.duration}ms ` +
+            `(attempted: ${engineResult.attemptedEngines.join(" → ")})`
+        );
+      }
 
-        if (detection.isChallenge) {
-          if (this.options.verbose) {
-            this.logger.info(`Challenge detected on ${url}: ${detection.type}`);
-          }
+      // Clean content with configurable options
+      const cleanedHtml = cleanContent(engineResult.html, engineResult.url, {
+        removeAds: this.options.removeAds,
+        removeBase64Images: this.options.removeBase64Images,
+        onlyMainContent: this.options.onlyMainContent,
+        includeTags: this.options.includeTags,
+        excludeTags: this.options.excludeTags,
+      });
 
-          // Wait for resolution
-          const result = await waitForChallengeResolution(hero, {
-            maxWaitMs: 45000,
-            pollIntervalMs: 500,
-            verbose: this.options.verbose,
-            initialUrl,
-          });
+      // Extract metadata
+      const websiteMetadata = extractMetadata(cleanedHtml, engineResult.url);
 
-          if (!result.resolved) {
-            throw new Error(`Challenge not resolved: ${detection.type}`);
-          }
+      const duration = Date.now() - startTime;
 
-          if (this.options.verbose) {
-            this.logger.info(`Challenge resolved via ${result.method} in ${result.waitedMs}ms`);
-          }
-        }
+      // Convert to requested formats
+      const markdown = this.options.formats.includes("markdown")
+        ? htmlToMarkdown(cleanedHtml)
+        : undefined;
 
-        // Wait for any Cloudflare redirects to complete
-        // Cloudflare often does a silent redirect after bypass, we need to wait for the final page
-        await this.waitForFinalPage(hero, url, this.options.verbose);
+      const htmlOutput = this.options.formats.includes("html") ? cleanedHtml : undefined;
 
-        // Wait for selector if specified
-        if (this.options.waitForSelector) {
-          try {
-            await hero.waitForElement(hero.document.querySelector(this.options.waitForSelector), {
-              timeoutMs: this.options.timeoutMs,
-            });
-          } catch (error) {
-            this.logger.warn(`Selector not found: ${this.options.waitForSelector}`);
-          }
-        }
-
-        // Extract content
-        const html = await hero.document.documentElement.outerHTML;
-
-        // Clean content with configurable options
-        const cleanedHtml = cleanContent(html, url, {
-          removeAds: this.options.removeAds,
-          removeBase64Images: this.options.removeBase64Images,
-          onlyMainContent: this.options.onlyMainContent,
-          includeTags: this.options.includeTags,
-          excludeTags: this.options.excludeTags,
+      // Report progress
+      if (this.options.onProgress) {
+        this.options.onProgress({
+          completed: index + 1,
+          total: this.options.urls.length,
+          currentUrl: url,
         });
+      }
 
-        // Extract metadata
-        const websiteMetadata = extractMetadata(cleanedHtml, url);
-
-        const duration = Date.now() - startTime;
-
-        // Convert to requested formats
-        const markdown = this.options.formats.includes("markdown")
-          ? htmlToMarkdown(cleanedHtml)
-          : undefined;
-
-        const htmlOutput = this.options.formats.includes("html")
-          ? cleanedHtml
-          : undefined;
-
-        // Report progress
-        if (this.options.onProgress) {
-          this.options.onProgress({
-            completed: index + 1,
-            total: this.options.urls.length,
-            currentUrl: url,
-          });
-        }
-
-        // Build proxy metadata if proxy was used
-        let proxyMetadata: ProxyMetadata | undefined;
-        if (this.options.proxy) {
-          const proxy = this.options.proxy;
-          // Extract host and port from either url or direct config
-          if (proxy.url) {
-            try {
-              const proxyUrl = new URL(proxy.url);
-              proxyMetadata = {
-                host: proxyUrl.hostname,
-                port: parseInt(proxyUrl.port, 10) || 80,
-                country: proxy.country,
-              };
-            } catch {
-              // Invalid URL, skip proxy metadata
-            }
-          } else if (proxy.host && proxy.port) {
+      // Build proxy metadata if proxy was used
+      let proxyMetadata: ProxyMetadata | undefined;
+      if (this.options.proxy) {
+        const proxy = this.options.proxy;
+        // Extract host and port from either url or direct config
+        if (proxy.url) {
+          try {
+            const proxyUrl = new URL(proxy.url);
             proxyMetadata = {
-              host: proxy.host,
-              port: proxy.port,
+              host: proxyUrl.hostname,
+              port: parseInt(proxyUrl.port, 10) || 80,
               country: proxy.country,
             };
+          } catch {
+            // Invalid URL, skip proxy metadata
           }
+        } else if (proxy.host && proxy.port) {
+          proxyMetadata = {
+            host: proxy.host,
+            port: proxy.port,
+            country: proxy.country,
+          };
         }
+      }
 
-        // Build result
-        const result: WebsiteScrapeResult = {
-          markdown,
-          html: htmlOutput,
-          metadata: {
-            baseUrl: url,
-            totalPages: 1,
-            scrapedAt: new Date().toISOString(),
-            duration,
-            website: websiteMetadata,
-            proxy: proxyMetadata,
-          },
-        };
+      // Build result
+      const result: WebsiteScrapeResult = {
+        markdown,
+        html: htmlOutput,
+        metadata: {
+          baseUrl: url,
+          totalPages: 1,
+          scrapedAt: new Date().toISOString(),
+          duration,
+          website: websiteMetadata,
+          proxy: proxyMetadata,
+        },
+      };
 
-        return result;
-      });
-    } catch (error: any) {
-      this.logger.error(`Failed to scrape ${url}: ${error.message}`);
+      return result;
+    } catch (error: unknown) {
+      // Handle AllEnginesFailedError with detailed logging
+      if (error instanceof AllEnginesFailedError) {
+        const engineSummary = error.attemptedEngines
+          .map((e) => `${e}: ${error.errors.get(e)?.message || "unknown"}`)
+          .join("; ");
+        this.logger.error(`Failed to scrape ${url}: All engines failed - ${engineSummary}`);
+      } else if (error instanceof Error) {
+        this.logger.error(`Failed to scrape ${url}: ${error.message}`);
+      } else {
+        this.logger.error(`Failed to scrape ${url}: ${String(error)}`);
+      }
 
       // Report progress (failed)
       if (this.options.onProgress) {

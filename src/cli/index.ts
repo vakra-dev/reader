@@ -173,6 +173,8 @@ program
   .option("--no-main-content", "Disable main content extraction (include full page)")
   .option("--include-tags <selectors>", "CSS selectors for elements to include (comma-separated)")
   .option("--exclude-tags <selectors>", "CSS selectors for elements to exclude (comma-separated)")
+  .option("--engine <name>", "Force a specific engine (http, tlsclient, hero)")
+  .option("--skip-engine <names>", "Skip specific engines (comma-separated: http,tlsclient,hero)")
   .action(async (urls: string[], options) => {
     const port = parseInt(options.port, 10);
     const useStandalone = options.standalone || false;
@@ -222,6 +224,11 @@ program
         ? options.excludeTags.split(",").map((s: string) => s.trim())
         : undefined;
 
+      // Parse engine options
+      const skipEngines = options.skipEngine
+        ? options.skipEngine.split(",").map((s: string) => s.trim())
+        : undefined;
+
       const scrapeOptions = {
         urls,
         formats,
@@ -236,6 +243,9 @@ program
         onlyMainContent: options.mainContent !== false, // --no-main-content sets this to false
         includeTags,
         excludeTags,
+        // Engine options
+        forceEngine: options.engine,
+        skipEngines,
         onProgress: options.verbose
           ? ({ completed, total, currentUrl }: { completed: number; total: number; currentUrl: string }) => {
               console.error(`[${completed}/${total}] ${currentUrl}`);

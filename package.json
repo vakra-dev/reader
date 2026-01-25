@@ -63,6 +63,7 @@
     "@ulixee/hero": "^2.0.0-alpha.34",
     "@ulixee/hero-core": "^2.0.0-alpha.34",
     "commander": "^12.0.0",
+    "got-scraping": "^4.1.3",
     "linkedom": "^0.18.12",
     "p-limit": "^4.0.0",
     "pino": "^9.0.0",

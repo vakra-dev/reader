@@ -1,6 +1,11 @@
 import pino from "pino";
 
 /**
+ * Logger type
+ */
+export type Logger = ReturnType<typeof createLogger>;
+
+/**
  * Check if pino-pretty is available
  */
 function hasPinoPretty(): boolean {

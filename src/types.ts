@@ -1,4 +1,5 @@
 import type { IBrowserPool } from "./browser/types";
+import type { EngineName } from "./engines/types.js";
 
 /**
  * Proxy configuration for Hero
@@ -58,6 +59,9 @@ export interface ScrapeOptions {
 
   /** Custom user agent string */
   userAgent?: string;
+
+  /** Custom headers for requests */
+  headers?: Record<string, string>;
 
   /** Request timeout in milliseconds (default: 30000) */
   timeoutMs?: number;
@@ -130,6 +134,19 @@ export interface ScrapeOptions {
 
   /** Browser pool instance (internal, provided by ReaderClient) */
   pool?: IBrowserPool;
+
+  // ============================================================================
+  // Engine options
+  // ============================================================================
+
+  /** Engines to use in order (default: ['http', 'tlsclient', 'hero']) */
+  engines?: EngineName[];
+
+  /** Skip specific engines (e.g., ['http'] to skip native fetch) */
+  skipEngines?: EngineName[];
+
+  /** Force a specific engine, skipping the cascade */
+  forceEngine?: EngineName;
 }
 
 /**
@@ -312,14 +329,18 @@ export interface ScraperConfig {
  */
 export const DEFAULT_OPTIONS: Omit<
   Required<ScrapeOptions>,
-  "proxy" | "waitForSelector" | "connectionToCore" | "userAgent" | "browserPool" | "pool"
+  "proxy" | "waitForSelector" | "connectionToCore" | "userAgent" | "headers" | "browserPool" | "pool" | "engines" | "skipEngines" | "forceEngine"
 > & {
   proxy?: ProxyConfig;
   waitForSelector?: string;
   connectionToCore?: any;
   userAgent?: string;
+  headers?: Record<string, string>;
   browserPool?: BrowserPoolConfig;
   pool?: IBrowserPool;
+  engines?: EngineName[];
+  skipEngines?: EngineName[];
+  forceEngine?: EngineName;
 } = {
   urls: [],
   formats: ["markdown"],
