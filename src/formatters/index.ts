@@ -1,4 +1,3 @@
 // Export all formatters
-export { formatToMarkdown } from "./markdown";
+export { formatToMarkdown, htmlToMarkdown } from "./markdown";
 export { formatToHTML } from "./html";
-export { formatToJson, formatToJsonLite } from "./json";

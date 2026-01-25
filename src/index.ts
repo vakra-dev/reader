@@ -46,10 +46,8 @@ export type { CrawlOptions, CrawlResult, CrawlUrl, CrawlMetadata } from "./crawl
 // =============================================================================
 // Formatter exports (for custom formatting)
 // =============================================================================
-export { formatToMarkdown } from "./formatters/markdown";
+export { formatToMarkdown, htmlToMarkdown } from "./formatters/markdown";
 export { formatToHTML } from "./formatters/html";
-export { formatToJson, formatToJsonLite } from "./formatters/json";
-export { formatToText } from "./formatters/text";
 
 // =============================================================================
 // Utility exports (for advanced usage)
@@ -99,3 +97,23 @@ export { createProxyUrl, parseProxyUrl } from "./proxy/config";
 // Default options export
 // =============================================================================
 export { DEFAULT_OPTIONS, isValidFormat, shouldCrawlUrl as shouldCrawlUrlFn } from "./types";
+
+// =============================================================================
+// Error exports
+// =============================================================================
+export {
+  ReaderError,
+  ReaderErrorCode,
+  NetworkError,
+  TimeoutError,
+  CloudflareError,
+  AccessDeniedError,
+  ContentExtractionError,
+  ValidationError,
+  InvalidUrlError,
+  RobotsBlockedError,
+  BrowserPoolError,
+  ClientClosedError,
+  NotInitializedError,
+  wrapError,
+} from "./errors";

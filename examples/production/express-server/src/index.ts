@@ -89,11 +89,11 @@ app.post("/scrape", async (req: Request, res: Response) => {
 
     // Validate formats if provided
     if (formats) {
-      const validFormats = ["markdown", "html", "json"];
+      const validFormats = ["markdown", "html"];
       if (!Array.isArray(formats) || !formats.every((f: string) => validFormats.includes(f))) {
         return res.status(400).json({
           success: false,
-          error: "formats must be an array of: markdown, html, json",
+          error: "formats must be an array of: markdown, html",
         });
       }
     }

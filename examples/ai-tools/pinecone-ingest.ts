@@ -43,7 +43,7 @@ async function main() {
     console.log(`Scraping ${urls.length} URLs...`);
     const result = await reader.scrape({
       urls,
-      formats: ["text"],
+      formats: ["markdown"],
       batchConcurrency: 2,
     });
 
@@ -55,7 +55,7 @@ async function main() {
 
     const vectors = [];
     for (const page of result.data) {
-      const content = page.text || "";
+      const content = page.markdown || "";
       if (!content) continue;
 
       // Truncate content to fit embedding model limits

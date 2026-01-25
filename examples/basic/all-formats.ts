@@ -2,7 +2,7 @@
 /**
  * All Formats Example
  *
- * Demonstrates outputting content in all supported formats
+ * Demonstrates outputting content in all supported formats (markdown and html)
  */
 
 import { ReaderClient } from "@vakra-dev/reader";
@@ -15,7 +15,7 @@ async function main() {
   try {
     const result = await reader.scrape({
       urls: ["https://example.com"],
-      formats: ["markdown", "html", "json", "text"],
+      formats: ["markdown", "html"],
     });
 
     const page = result.data[0];
@@ -30,17 +30,15 @@ async function main() {
     console.log("\nFormat Lengths:");
     console.log(`  Markdown: ${page.markdown?.length || 0} chars`);
     console.log(`  HTML: ${page.html?.length || 0} chars`);
-    console.log(`  JSON: ${page.json?.length || 0} chars`);
-    console.log(`  Text: ${page.text?.length || 0} chars`);
 
     console.log("\n--- MARKDOWN OUTPUT ---");
     console.log(page.markdown?.slice(0, 500));
 
-    console.log("\n--- TEXT OUTPUT ---");
-    console.log(page.text?.slice(0, 500));
+    console.log("\n--- HTML OUTPUT (first 500 chars) ---");
+    console.log(page.html?.slice(0, 500));
 
-    console.log("\n--- JSON OUTPUT ---");
-    console.log(page.json?.slice(0, 500));
+    console.log("\n--- FULL RESULT (JSON) ---");
+    console.log(JSON.stringify(result, null, 2).slice(0, 1000));
   } catch (error: any) {
     console.error("Error:", error.message);
     process.exit(1);

@@ -67,7 +67,6 @@ npx tsx ai-tools/qdrant-ingest.ts
 
 ## Tips
 
-- Use `text` format for cleaner LLM input (no HTML tags)
-- Set `includeMetadata: false` to reduce noise in prompts
+- Use `markdown` format for LLM input (cleaner than HTML)
 - Truncate content if it exceeds token limits
 - For production, consider chunking large documents before embedding

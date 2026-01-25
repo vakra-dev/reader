@@ -31,11 +31,10 @@ async function main() {
     // Step 1: Scrape the webpage
     const result = await reader.scrape({
       urls: [url],
-      formats: ["text"],
-      includeMetadata: false,
+      formats: ["markdown"],
     });
 
-    const content = result.data[0]?.text;
+    const content = result.data[0]?.markdown;
     if (!content) {
       console.error("No content scraped");
       process.exit(1);

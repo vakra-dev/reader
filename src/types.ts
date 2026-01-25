@@ -53,11 +53,8 @@ export interface ScrapeOptions {
   /** Array of URLs to scrape */
   urls: string[];
 
-  /** Output formats (default: ['markdown']) */
-  formats?: Array<"markdown" | "html" | "json" | "text">;
-
-  /** Include URL, title, timestamp (default: true) */
-  includeMetadata?: boolean;
+  /** Output formats - which content fields to include (default: ['markdown']) */
+  formats?: Array<"markdown" | "html">;
 
   /** Custom user agent string */
   userAgent?: string;
@@ -80,6 +77,15 @@ export interface ScrapeOptions {
 
   /** Remove base64-encoded images to reduce output size (default: true) */
   removeBase64Images?: boolean;
+
+  /** Extract only main content, removing nav/header/footer/sidebar (default: true) */
+  onlyMainContent?: boolean;
+
+  /** CSS selectors for elements to include (if set, only these elements are kept) */
+  includeTags?: string[];
+
+  /** CSS selectors for elements to exclude (removed from output) */
+  excludeTags?: string[];
 
   /** Skip TLS/SSL certificate verification (default: true) */
   skipTLSVerification?: boolean;
@@ -208,20 +214,14 @@ export interface Page {
 }
 
 /**
- * Individual website scrape result (for backward compatibility)
+ * Individual website scrape result
  */
 export interface WebsiteScrapeResult {
-  /** Markdown output (present if 'markdown' in formats) */
+  /** Markdown content (present if 'markdown' in formats) */
   markdown?: string;
 
-  /** HTML output (present if 'html' in formats) */
+  /** HTML content (present if 'html' in formats) */
   html?: string;
-
-  /** JSON output (present if 'json' in formats) */
-  json?: string;
-
-  /** Plain text output (present if 'text' in formats) */
-  text?: string;
 
   /** Metadata about the scraping operation */
   metadata: {
@@ -323,13 +323,15 @@ export const DEFAULT_OPTIONS: Omit<
 } = {
   urls: [],
   formats: ["markdown"],
-  includeMetadata: true,
   timeoutMs: 30000,
   includePatterns: [],
   excludePatterns: [],
   // Content cleaning defaults
   removeAds: true,
   removeBase64Images: true,
+  onlyMainContent: true,
+  includeTags: [],
+  excludeTags: [],
   skipTLSVerification: true,
   // Batch defaults
   batchConcurrency: 1,
@@ -344,8 +346,8 @@ export const DEFAULT_OPTIONS: Omit<
 /**
  * Format type guard
  */
-export function isValidFormat(format: string): format is "markdown" | "html" | "json" | "text" {
-  return format === "markdown" || format === "html" || format === "json" || format === "text";
+export function isValidFormat(format: string): format is "markdown" | "html" {
+  return format === "markdown" || format === "html";
 }
 
 /**

@@ -33,7 +33,7 @@ async function processJob(job: Job<ScrapeJobData>): Promise<ScrapeJobResult> {
     // Perform scrape
     const result = await reader.scrape({
       urls,
-      formats: formats as Array<"markdown" | "html" | "json" | "text">,
+      formats: formats as Array<"markdown" | "html">,
     });
 
     // Update progress: scraping complete
@@ -84,7 +84,6 @@ async function processJob(job: Job<ScrapeJobData>): Promise<ScrapeJobResult> {
           success: true,
           markdown: r.markdown,
           html: r.html,
-          json: r.json ? JSON.parse(r.json) : undefined,
         })),
       },
     };

@@ -52,7 +52,7 @@ class ReaderEngineLoader extends BaseDocumentLoader {
         for (const page of result.scraped.data) {
           documents.push(
             new Document({
-              pageContent: page.text || page.markdown || "",
+              pageContent: page.markdown || "",
               metadata: {
                 source: page.metadata.baseUrl,
                 title: page.metadata.website.title,
@@ -67,14 +67,14 @@ class ReaderEngineLoader extends BaseDocumentLoader {
       // Scrape mode: scrape specific URLs
       const result = await this.reader.scrape({
         urls: this.urls,
-        formats: ["text", "markdown"],
+        formats: ["markdown"],
         batchConcurrency: 2,
       });
 
       for (const page of result.data) {
         documents.push(
           new Document({
-            pageContent: page.text || page.markdown || "",
+            pageContent: page.markdown || "",
             metadata: {
               source: page.metadata.baseUrl,
               title: page.metadata.website.title,

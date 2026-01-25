@@ -1,8 +1,14 @@
 import { parseHTML } from "linkedom";
-import type { Page } from "../types";
 
 /**
  * HTML content cleaning utilities using DOM parsing
+ *
+ * Layered extraction strategy:
+ * 1. Remove scripts, styles, hidden elements (always safe)
+ * 2. Remove overlays/modals (always safe)
+ * 3. Remove ads (if enabled)
+ * 4. Remove navigation with protection (check each element before removing)
+ * 5. Find and isolate main content
  */
 
 /**
@@ -13,159 +19,519 @@ export interface CleaningOptions {
   removeAds?: boolean;
   /** Remove base64-encoded images (default: true) */
   removeBase64Images?: boolean;
+  /** Extract only main content, removing nav/header/footer/sidebar (default: true) */
+  onlyMainContent?: boolean;
+  /** CSS selectors for elements to include (if set, only these elements are kept) */
+  includeTags?: string[];
+  /** CSS selectors for elements to exclude (removed from output) */
+  excludeTags?: string[];
 }
 
 /**
- * Selectors for elements to always remove from content
+ * Selectors for elements that should ALWAYS be removed (never content)
  */
 const ALWAYS_REMOVE_SELECTORS = [
-  // Navigation and menus
-  "nav",
-  "header nav",
-  "footer nav",
-  ".nav",
-  ".navigation",
-  ".menu",
-  ".navbar",
-  ".sidebar",
-  ".aside",
-
-  // Header and footer elements
-  "header",
-  "footer",
-  ".site-header",
-  ".page-header",
-  ".site-footer",
-  ".page-footer",
-
-  // Social media and sharing
-  ".social",
-  ".share",
-  ".sharing",
-  ".twitter",
-  ".facebook",
-  ".linkedin",
-  ".instagram",
-
-  // Comments and discussions
-  ".comments",
-  ".comment",
-  ".discussion",
-  ".disqus",
-
-  // Forms and interactive elements
-  "form",
-  "input",
-  "button:not([type='submit'])",
-  "select",
-  "textarea",
-
   // Scripts and styles
   "script",
   "style",
   "noscript",
+  "link[rel='stylesheet']",
 
   // Hidden elements
   "[hidden]",
+  "[aria-hidden='true']",
   "[style*='display: none']",
   "[style*='display:none']",
+  "[style*='visibility: hidden']",
+  "[style*='visibility:hidden']",
 
-  // Common utility classes
-  ".cookie",
-  ".cookie-banner",
-  ".popup",
-  ".modal",
-  ".overlay",
-  ".notification",
+  // SVG icons and decorative elements
+  "svg[aria-hidden='true']",
+  "svg.icon",
+  "svg[class*='icon']",
 
-  // Breadcrumbs
-  ".breadcrumb",
-  ".breadcrumbs",
-  ".breadcrumb-trail",
+  // Template and metadata
+  "template",
+  "meta",
+
+  // Embeds that don't convert to text
+  "iframe",
+  "canvas",
+  "object",
+  "embed",
+
+  // Forms (usually not main content)
+  "form",
+  "input",
+  "select",
+  "textarea",
+  "button",
 ];
 
 /**
- * Selectors for ad-related elements (only removed when removeAds is true)
+ * Selectors for overlays, modals, popups (always remove)
  */
-const AD_SELECTORS = [
-  // Ads and promotions
+const OVERLAY_SELECTORS = [
+  "[class*='modal']",
+  "[class*='popup']",
+  "[class*='overlay']",
+  "[class*='dialog']",
+  "[role='dialog']",
+  "[role='alertdialog']",
+  "[class*='cookie']",
+  "[class*='consent']",
+  "[class*='gdpr']",
+  "[class*='privacy-banner']",
+  "[class*='notification-bar']",
+  "[id*='cookie']",
+  "[id*='consent']",
+  "[id*='gdpr']",
+  // Fixed/sticky positioned elements
+  "[style*='position: fixed']",
+  "[style*='position:fixed']",
+  "[style*='position: sticky']",
+  "[style*='position:sticky']",
+];
+
+/**
+ * Navigation/boilerplate selectors - exact matches only
+ * No wildcards like [class*="nav-"] which are too aggressive
+ */
+const NAVIGATION_SELECTORS = [
+  // Semantic elements
+  "header",
+  "footer",
+  "nav",
+  "aside",
+
+  // Header variations
+  ".header",
+  ".top",
+  ".navbar",
+  "#header",
+
+  // Footer variations
+  ".footer",
+  ".bottom",
+  "#footer",
+
+  // Sidebars
+  ".sidebar",
+  ".side",
+  ".aside",
+  "#sidebar",
+
+  // Modals/popups (backup if not caught by OVERLAY_SELECTORS)
+  ".modal",
+  ".popup",
+  "#modal",
+  ".overlay",
+
+  // Ads
   ".ad",
   ".ads",
-  ".advertisement",
-  ".promotion",
-  ".sponsored",
-  "[class*='ad-']",
-  "[id*='ad-']",
-  "[class*='advert']",
-  "[id*='advert']",
-  "[class*='banner']",
-  "[id*='banner']",
-  ".google-ad",
-  ".adsense",
-  "[data-ad]",
-  "[data-ads]",
-  "ins.adsbygoogle",
-  // Tracking
-  "[class*='tracking']",
-  "[id*='tracking']",
-  "[class*='analytics']",
-  "[id*='analytics']",
+  ".advert",
+  "#ad",
+
+  // Language selectors
+  ".lang-selector",
+  ".language",
+  "#language-selector",
+
+  // Social
+  ".social",
+  ".social-media",
+  ".social-links",
+  "#social",
+
+  // Navigation/menus
+  ".menu",
+  ".navigation",
+  "#nav",
+
+  // Breadcrumbs
+  ".breadcrumbs",
+  "#breadcrumbs",
+
+  // Share buttons
+  ".share",
+  "#share",
+
+  // Widgets
+  ".widget",
+  "#widget",
+
+  // Cookie notices (backup)
+  ".cookie",
+  "#cookie",
 ];
 
 /**
- * Selectors for main content areas (in priority order)
+ * Force-include selectors - elements containing these are PROTECTED from removal
  */
-const CONTENT_SELECTORS = [
+const FORCE_INCLUDE_SELECTORS = [
+  // IDs
+  "#main",
+  "#content",
+  "#main-content",
+  "#article",
+  "#post",
+  "#page-content",
+
+  // Semantic elements
   "main",
   "article",
-  ".content",
-  ".main-content",
-  ".post-content",
-  ".entry-content",
-  ".article-content",
   "[role='main']",
-  ".container",
-  ".wrapper",
+
+  // Classes
+  ".main-content",
+  ".content",
+  ".post-content",
+  ".article-content",
+  ".entry-content",
+  ".page-content",
+  ".article-body",
+  ".post-body",
+  ".story-content",
+  ".blog-content",
 ];
 
 /**
- * Clean HTML content by removing unwanted elements
- * Uses proper DOM parsing instead of regex for reliable element removal
+ * Ad-related selectors (removed when removeAds is true)
  */
-export function cleanHtml(
-  html: string,
-  baseUrl: string,
-  options: CleaningOptions = {}
-): string {
-  const { removeAds = true, removeBase64Images = true } = options;
-  const { document } = parseHTML(html);
+const AD_SELECTORS = [
+  // Google ads
+  "ins.adsbygoogle",
+  ".google-ad",
+  ".adsense",
 
-  // Remove elements that are always unwanted
-  for (const selector of ALWAYS_REMOVE_SELECTORS) {
+  // Generic ad containers
+  "[data-ad]",
+  "[data-ads]",
+  "[data-ad-slot]",
+  "[data-ad-client]",
+
+  // Common ad class patterns
+  ".ad-container",
+  ".ad-wrapper",
+  ".advertisement",
+  ".sponsored-content",
+
+  // Tracking pixels
+  "img[width='1'][height='1']",
+  "img[src*='pixel']",
+  "img[src*='tracking']",
+  "img[src*='analytics']",
+];
+
+// ============================================================================
+// Content Scoring Heuristics
+// ============================================================================
+
+/**
+ * Calculate link density of an element (ratio of link text to total text)
+ * High link density (>0.5) indicates navigation, not content
+ */
+function getLinkDensity(element: Element): number {
+  const text = element.textContent || "";
+  const textLength = text.trim().length;
+  if (textLength === 0) return 1;
+
+  let linkLength = 0;
+  element.querySelectorAll("a").forEach((link: Element) => {
+    linkLength += (link.textContent || "").trim().length;
+  });
+
+  return linkLength / textLength;
+}
+
+/**
+ * Calculate content score for an element
+ * Higher scores indicate more likely to be main content
+ */
+function getContentScore(element: Element): number {
+  let score = 0;
+  const text = element.textContent || "";
+  const textLength = text.trim().length;
+
+  // Positive signals
+  score += Math.min(textLength / 100, 50); // Text density (capped)
+  score += element.querySelectorAll("p").length * 3; // Paragraphs
+  score += element.querySelectorAll("h1, h2, h3, h4, h5, h6").length * 2; // Headings
+  score += element.querySelectorAll("img").length * 1; // Images (slight bonus)
+
+  // Negative signals
+  score -= element.querySelectorAll("a").length * 0.5; // Too many links
+  score -= element.querySelectorAll("li").length * 0.2; // Too many list items
+
+  // Link density penalty
+  const linkDensity = getLinkDensity(element);
+  if (linkDensity > 0.5) score -= 30;
+  else if (linkDensity > 0.3) score -= 15;
+
+  // Class/ID signals
+  const classAndId = (element.className || "") + " " + (element.id || "");
+  if (/article|content|post|body|main|entry/i.test(classAndId)) score += 25;
+  if (/comment|sidebar|footer|nav|menu|header|widget|ad/i.test(classAndId)) score -= 25;
+
+  return score;
+}
+
+/**
+ * Check if an element looks like navigation (high link density, list-heavy)
+ */
+function looksLikeNavigation(element: Element): boolean {
+  const linkDensity = getLinkDensity(element);
+  if (linkDensity > 0.5) return true;
+
+  // Check for menu-like structures (many list items with links)
+  const listItems = element.querySelectorAll("li");
+  const links = element.querySelectorAll("a");
+  if (listItems.length > 5 && links.length > listItems.length * 0.8) return true;
+
+  return false;
+}
+
+// ============================================================================
+// Removal Functions
+// ============================================================================
+
+/**
+ * Simple removal without protection checks (for always-safe selectors)
+ */
+function removeElements(document: Document, selectors: string[]): void {
+  for (const selector of selectors) {
     try {
       document.querySelectorAll(selector).forEach((el: Element) => el.remove());
     } catch {
       // Some selectors may not be supported, skip them
     }
   }
+}
 
-  // Remove ad-related elements if removeAds is true
+/**
+ * Remove elements WITH PROTECTION - checks each element before removing
+ * This is the key fix: if an element contains protected content, don't remove it
+ */
+function removeWithProtection(
+  document: Document,
+  selectorsToRemove: string[],
+  protectedSelectors: string[]
+): void {
+  for (const selector of selectorsToRemove) {
+    try {
+      document.querySelectorAll(selector).forEach((element: Element) => {
+        // Check 1: Is this element itself protected?
+        const isProtected = protectedSelectors.some((ps) => {
+          try {
+            return element.matches(ps);
+          } catch {
+            return false;
+          }
+        });
+        if (isProtected) return;
+
+        // Check 2: Does element CONTAIN protected content?
+        const containsProtected = protectedSelectors.some((ps) => {
+          try {
+            return element.querySelector(ps) !== null;
+          } catch {
+            return false;
+          }
+        });
+        if (containsProtected) return;
+
+        // Safe to remove
+        element.remove();
+      });
+    } catch {
+      // Skip invalid selector
+    }
+  }
+}
+
+// ============================================================================
+// Main Content Extraction
+// ============================================================================
+
+/**
+ * Find the main content container using multiple strategies
+ */
+function findMainContent(document: Document): Element | null {
+  // Helper to validate a content element
+  const isValidContent = (el: Element | null): el is Element => {
+    if (!el) return false;
+    const text = el.textContent || "";
+    if (text.trim().length < 100) return false;
+    // Reject if it looks like navigation
+    if (looksLikeNavigation(el)) return false;
+    return true;
+  };
+
+  // Priority 1: Semantic <main> element
+  const main = document.querySelector("main");
+  if (isValidContent(main) && getLinkDensity(main) < 0.4) {
+    return main;
+  }
+
+  // Priority 2: [role="main"]
+  const roleMain = document.querySelector('[role="main"]');
+  if (isValidContent(roleMain) && getLinkDensity(roleMain) < 0.4) {
+    return roleMain;
+  }
+
+  // Priority 3: Single <article> element
+  const articles = document.querySelectorAll("article");
+  if (articles.length === 1 && isValidContent(articles[0])) {
+    return articles[0];
+  }
+
+  // Priority 4: Content container by ID/class
+  const contentSelectors = [
+    "#content",
+    "#main-content",
+    "#main",
+    ".content",
+    ".main-content",
+    ".post-content",
+    ".article-content",
+    ".entry-content",
+    ".page-content",
+    ".article-body",
+    ".post-body",
+    ".story-content",
+    ".blog-content",
+  ];
+
+  for (const selector of contentSelectors) {
+    try {
+      const el = document.querySelector(selector);
+      if (isValidContent(el) && getLinkDensity(el) < 0.4) {
+        return el;
+      }
+    } catch {
+      // Invalid selector, skip
+    }
+  }
+
+  // Priority 5: Score-based selection (find highest scoring element)
+  const candidates: Array<{ el: Element; score: number }> = [];
+  const containers = document.querySelectorAll("div, section, article");
+
+  containers.forEach((el: Element) => {
+    const text = el.textContent || "";
+    if (text.trim().length < 200) return;
+
+    const score = getContentScore(el);
+    if (score > 0) {
+      candidates.push({ el, score });
+    }
+  });
+
+  // Sort by score and return highest
+  candidates.sort((a, b) => b.score - a.score);
+
+  if (candidates.length > 0 && candidates[0].score > 20) {
+    return candidates[0].el;
+  }
+
+  // No main content found
+  return null;
+}
+
+/**
+ * Clean HTML content using layered extraction strategy
+ */
+export function cleanHtml(html: string, baseUrl: string, options: CleaningOptions = {}): string {
+  const {
+    removeAds = true,
+    removeBase64Images = true,
+    onlyMainContent = true,
+    includeTags,
+    excludeTags,
+  } = options;
+
+  const { document } = parseHTML(html);
+
+  // ============================================================================
+  // Layer 1: Always remove scripts, styles, hidden elements, overlays
+  // ============================================================================
+  removeElements(document, ALWAYS_REMOVE_SELECTORS);
+  removeElements(document, OVERLAY_SELECTORS);
+
+  // ============================================================================
+  // Layer 2: Remove ad-related elements (if enabled)
+  // ============================================================================
   if (removeAds) {
-    for (const selector of AD_SELECTORS) {
+    removeElements(document, AD_SELECTORS);
+  }
+
+  // ============================================================================
+  // Layer 3: Apply user-provided excludeTags
+  // ============================================================================
+  if (excludeTags && excludeTags.length > 0) {
+    removeElements(document, excludeTags);
+  }
+
+  // ============================================================================
+  // Layer 4: Extract main content (if enabled)
+  // KEY FIX: Use protection-aware removal
+  // ============================================================================
+  if (onlyMainContent) {
+    // Remove navigation elements WITH PROTECTION
+    // Each element is checked: if it contains #main, .content, etc., don't remove
+    removeWithProtection(document, NAVIGATION_SELECTORS, FORCE_INCLUDE_SELECTORS);
+
+    // Then try to find and isolate main content
+    const mainContent = findMainContent(document);
+
+    if (mainContent) {
+      // Replace body with just the main content
+      const body = document.body;
+      if (body) {
+        const clone = mainContent.cloneNode(true) as Element;
+        body.innerHTML = "";
+        body.appendChild(clone);
+      }
+    }
+    // If no main content found, we've removed navigation with protection, which is good
+  }
+
+  // ============================================================================
+  // Layer 5: Apply user-provided includeTags (whitelist mode)
+  // ============================================================================
+  if (includeTags && includeTags.length > 0) {
+    const matchedElements: Element[] = [];
+
+    for (const selector of includeTags) {
       try {
-        document.querySelectorAll(selector).forEach((el: Element) => el.remove());
+        document.querySelectorAll(selector).forEach((el: Element) => {
+          matchedElements.push(el.cloneNode(true) as Element);
+        });
       } catch {
-        // Some selectors may not be supported, skip them
+        // Invalid selector, skip
+      }
+    }
+
+    if (matchedElements.length > 0) {
+      const body = document.body;
+      if (body) {
+        body.innerHTML = "";
+        matchedElements.forEach((el) => body.appendChild(el));
       }
     }
   }
 
-  // Remove base64 images if removeBase64Images is true
+  // ============================================================================
+  // Layer 6: Clean up remaining elements
+  // ============================================================================
+
+  // Remove base64 images
   if (removeBase64Images) {
     removeBase64ImagesFromDocument(document);
   }
 
-  // Remove HTML comments by iterating through comment nodes
+  // Remove HTML comments
   const walker = document.createTreeWalker(document, 128 /* NodeFilter.SHOW_COMMENT */);
   const comments: Node[] = [];
   while (walker.nextNode()) {
@@ -188,12 +554,14 @@ function removeBase64ImagesFromDocument(document: Document): void {
     el.remove();
   });
 
-  // Remove elements with base64 background images in style attribute
+  // Remove elements with base64 background images
   document.querySelectorAll("[style*='data:image']").forEach((el: Element) => {
     const style = el.getAttribute("style");
     if (style) {
-      // Remove just the background-image property, not the whole element
-      const cleanedStyle = style.replace(/background(-image)?:\s*url\([^)]*data:image[^)]*\)[^;]*;?/gi, "");
+      const cleanedStyle = style.replace(
+        /background(-image)?:\s*url\([^)]*data:image[^)]*\)[^;]*;?/gi,
+        ""
+      );
       if (cleanedStyle.trim()) {
         el.setAttribute("style", cleanedStyle);
       } else {
@@ -209,7 +577,7 @@ function removeBase64ImagesFromDocument(document: Document): void {
 }
 
 /**
- * Convert relative URLs to absolute URLs in the document
+ * Convert relative URLs to absolute URLs
  */
 function convertRelativeUrls(document: Document, baseUrl: string): void {
   // Convert src attributes
@@ -246,57 +614,8 @@ function convertRelativeUrls(document: Document, baseUrl: string): void {
 }
 
 /**
- * Extract the main content from HTML
- * Tries to find the main content area using common selectors
+ * Main export - clean HTML content
  */
-export function extractMainContent(
-  html: string,
-  baseUrl: string,
-  options: CleaningOptions = {}
-): string {
-  const cleanedHtml = cleanHtml(html, baseUrl, options);
-  const { document } = parseHTML(cleanedHtml);
-
-  // Try to find main content areas in priority order
-  for (const selector of CONTENT_SELECTORS) {
-    try {
-      const element = document.querySelector(selector);
-      if (element && element.innerHTML.trim().length > 100) {
-        // Return the inner HTML of the content area
-        return element.innerHTML;
-      }
-    } catch {
-      // Selector not supported, continue
-    }
-  }
-
-  // If no specific content area found, return the body content or full cleaned HTML
-  return document.body?.innerHTML || cleanedHtml;
-}
-
-/**
- * Clean HTML content (alias for cleanHtml with options)
- */
-export function cleanContent(
-  html: string,
-  baseUrl: string,
-  options: CleaningOptions = {}
-): string {
+export function cleanContent(html: string, baseUrl: string, options: CleaningOptions = {}): string {
   return cleanHtml(html, baseUrl, options);
-}
-
-/**
- * Clean and process page content
- */
-export function processPageContent(
-  page: Page,
-  baseUrl: string,
-  options: CleaningOptions = {}
-): Page {
-  const cleanedHtml = extractMainContent(page.html, baseUrl, options);
-
-  return {
-    ...page,
-    html: cleanedHtml,
-  };
 }

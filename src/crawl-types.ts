@@ -33,8 +33,8 @@ export interface CrawlOptions {
   // Scrape options (used when scrape: true)
   // ============================================================================
 
-  /** Output formats for scraped content (default: ['markdown', 'html']) */
-  formats?: Array<"markdown" | "html" | "json" | "text">;
+  /** Output formats for scraped content (default: ['markdown']) */
+  formats?: Array<"markdown" | "html">;
 
   /** Number of URLs to scrape in parallel (default: 2) */
   scrapeConcurrency?: number;

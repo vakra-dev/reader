@@ -30,7 +30,7 @@ async function main() {
 
     const result = await reader.scrape({
       urls: [url],
-      formats: ["markdown", "text"],
+      formats: ["markdown"],
       timeoutMs: 5000, // Allow extra time for challenge resolution
     });
 
@@ -50,7 +50,7 @@ async function main() {
     console.log(`  Content length: ${page.markdown?.length || 0} chars`);
 
     console.log("\n--- CONTENT PREVIEW (first 500 chars) ---\n");
-    console.log(page.text?.slice(0, 500) || page.markdown?.slice(0, 500));
+    console.log(page.markdown?.slice(0, 500));
 
     console.log("\n--- METADATA ---");
     console.log(`  Description: ${page.metadata.website.description || "N/A"}`);

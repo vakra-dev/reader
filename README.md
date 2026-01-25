@@ -66,7 +66,8 @@ All the hard stuff, browser pooling, challenge detection, proxy rotation, retrie
 ## Features
 
 - **Cloudflare Bypass** - TLS fingerprinting, DNS over TLS, WebRTC masking
-- **Multiple Formats** - Markdown, HTML, JSON, plain text
+- **Clean Output** - Markdown and HTML with automatic main content extraction
+- **Smart Content Cleaning** - Removes nav, headers, footers, popups, cookie banners
 - **CLI & API** - Use from command line or programmatically
 - **Browser Pool** - Auto-recycling, health monitoring, queue management
 - **Concurrent Scraping** - Parallel URL processing with progress tracking
@@ -92,11 +93,11 @@ const reader = new ReaderClient();
 
 const result = await reader.scrape({
   urls: ["https://example.com"],
-  formats: ["markdown", "text"],
+  formats: ["markdown", "html"],
 });
 
 console.log(result.data[0].markdown);
-console.log(result.data[0].text);
+console.log(result.data[0].html);
 
 await reader.close();
 ```
@@ -242,7 +243,7 @@ Scrape one or more URLs.
 npx reader scrape https://example.com
 
 # Scrape with multiple formats
-npx reader scrape https://example.com -f markdown,text
+npx reader scrape https://example.com -f markdown,html
 
 # Scrape multiple URLs concurrently
 npx reader scrape https://example.com https://example.org -c 2
@@ -253,7 +254,7 @@ npx reader scrape https://example.com -o output.md
 
 | Option                   | Type   | Default      | Description                                               |
 | ------------------------ | ------ | ------------ | --------------------------------------------------------- |
-| `-f, --format <formats>` | string | `"markdown"` | Output formats (comma-separated: markdown,html,json,text) |
+| `-f, --format <formats>` | string | `"markdown"` | Output formats (comma-separated: markdown,html)           |
 | `-o, --output <file>`    | string | stdout       | Output file path                                          |
 | `-c, --concurrency <n>`  | number | `1`          | Parallel requests                                         |
 | `-t, --timeout <ms>`     | number | `30000`      | Request timeout in milliseconds                           |
@@ -261,7 +262,9 @@ npx reader scrape https://example.com -o output.md
 | `--proxy <url>`          | string | -            | Proxy URL (e.g., http://user:pass@host:port)              |
 | `--user-agent <string>`  | string | -            | Custom user agent string                                  |
 | `--show-chrome`          | flag   | -            | Show browser window for debugging                         |
-| `--no-metadata`          | flag   | -            | Exclude metadata from output                              |
+| `--no-main-content`      | flag   | -            | Disable main content extraction (include full page)       |
+| `--include-tags <sel>`   | string | -            | CSS selectors for elements to include (comma-separated)   |
+| `--exclude-tags <sel>`   | string | -            | CSS selectors for elements to exclude (comma-separated)   |
 | `-v, --verbose`          | flag   | -            | Enable verbose logging                                    |
 
 ### `reader crawl <url>`
@@ -352,24 +355,26 @@ await reader.close();
 
 Scrape one or more URLs. Can be used directly or via `ReaderClient`.
 
-| Option             | Type                                              | Required | Default        | Description                                                     |
-| ------------------ | ------------------------------------------------- | -------- | -------------- | --------------------------------------------------------------- |
-| `urls`             | `string[]`                                        | Yes      | -              | Array of URLs to scrape                                         |
-| `formats`          | `Array<"markdown" \| "html" \| "json" \| "text">` | No       | `["markdown"]` | Output formats                                                  |
-| `includeMetadata`  | `boolean`                                         | No       | `true`         | Include URL, title, timestamp in output                         |
-| `userAgent`        | `string`                                          | No       | -              | Custom user agent string                                        |
-| `timeoutMs`        | `number`                                          | No       | `30000`        | Request timeout in milliseconds                                 |
-| `includePatterns`  | `string[]`                                        | No       | `[]`           | URL patterns to include (regex strings)                         |
-| `excludePatterns`  | `string[]`                                        | No       | `[]`           | URL patterns to exclude (regex strings)                         |
-| `batchConcurrency` | `number`                                          | No       | `1`            | Number of URLs to process in parallel                           |
-| `batchTimeoutMs`   | `number`                                          | No       | `300000`       | Total timeout for entire batch operation                        |
-| `maxRetries`       | `number`                                          | No       | `2`            | Maximum retry attempts for failed URLs                          |
-| `onProgress`       | `function`                                        | No       | -              | Progress callback: `({ completed, total, currentUrl }) => void` |
-| `proxy`            | `ProxyConfig`                                     | No       | -              | Proxy configuration object                                      |
-| `waitForSelector`  | `string`                                          | No       | -              | CSS selector to wait for before page is loaded                  |
-| `verbose`          | `boolean`                                         | No       | `false`        | Enable verbose logging                                          |
-| `showChrome`       | `boolean`                                         | No       | `false`        | Show Chrome window for debugging                                |
-| `connectionToCore` | `any`                                             | No       | -              | Connection to shared Hero Core (for production)                 |
+| Option             | Type                              | Required | Default        | Description                                                     |
+| ------------------ | --------------------------------- | -------- | -------------- | --------------------------------------------------------------- |
+| `urls`             | `string[]`                        | Yes      | -              | Array of URLs to scrape                                         |
+| `formats`          | `Array<"markdown" \| "html">`     | No       | `["markdown"]` | Output formats                                                  |
+| `onlyMainContent`  | `boolean`                         | No       | `true`         | Extract only main content (removes nav/header/footer)           |
+| `includeTags`      | `string[]`                        | No       | `[]`           | CSS selectors for elements to keep                              |
+| `excludeTags`      | `string[]`                        | No       | `[]`           | CSS selectors for elements to remove                            |
+| `userAgent`        | `string`                          | No       | -              | Custom user agent string                                        |
+| `timeoutMs`        | `number`                          | No       | `30000`        | Request timeout in milliseconds                                 |
+| `includePatterns`  | `string[]`                        | No       | `[]`           | URL patterns to include (regex strings)                         |
+| `excludePatterns`  | `string[]`                        | No       | `[]`           | URL patterns to exclude (regex strings)                         |
+| `batchConcurrency` | `number`                          | No       | `1`            | Number of URLs to process in parallel                           |
+| `batchTimeoutMs`   | `number`                          | No       | `300000`       | Total timeout for entire batch operation                        |
+| `maxRetries`       | `number`                          | No       | `2`            | Maximum retry attempts for failed URLs                          |
+| `onProgress`       | `function`                        | No       | -              | Progress callback: `({ completed, total, currentUrl }) => void` |
+| `proxy`            | `ProxyConfig`                     | No       | -              | Proxy configuration object                                      |
+| `waitForSelector`  | `string`                          | No       | -              | CSS selector to wait for before page is loaded                  |
+| `verbose`          | `boolean`                         | No       | `false`        | Enable verbose logging                                          |
+| `showChrome`       | `boolean`                         | No       | `false`        | Show Chrome window for debugging                                |
+| `connectionToCore` | `any`                             | No       | -              | Connection to shared Hero Core (for production)                 |
 
 **Returns:** `Promise<ScrapeResult>`
 
@@ -382,8 +387,6 @@ interface ScrapeResult {
 interface WebsiteScrapeResult {
   markdown?: string;
   html?: string;
-  json?: string;
-  text?: string;
   metadata: {
     baseUrl: string;
     totalPages: number;

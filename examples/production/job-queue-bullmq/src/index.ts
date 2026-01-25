@@ -103,7 +103,7 @@ app.post("/jobs", async (req: Request, res: Response) => {
     }
 
     // Validate formats if provided
-    const validFormats = ["markdown", "html", "json", "text"];
+    const validFormats = ["markdown", "html"];
     if (formats) {
       if (!Array.isArray(formats) || !formats.every((f: string) => validFormats.includes(f))) {
         return res.status(400).json({

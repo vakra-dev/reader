@@ -157,7 +157,7 @@ program
   .description("Scrape one or more URLs")
   .option(
     "-f, --format <formats>",
-    "Output formats (comma-separated: markdown,html,json,text)",
+    "Content formats to include (comma-separated: markdown,html)",
     "markdown"
   )
   .option("-o, --output <file>", "Output file (stdout if omitted)")
@@ -167,10 +167,12 @@ program
   .option("--user-agent <string>", "Custom user agent string")
   .option("--batch-timeout <ms>", "Total timeout for entire batch operation", "300000")
   .option("--show-chrome", "Show browser window for debugging")
-  .option("--no-metadata", "Exclude metadata from output")
   .option("--standalone", "Force standalone mode (bypass daemon)")
   .option("-p, --port <n>", `Daemon port (default: ${DEFAULT_DAEMON_PORT})`, String(DEFAULT_DAEMON_PORT))
   .option("-v, --verbose", "Enable verbose logging")
+  .option("--no-main-content", "Disable main content extraction (include full page)")
+  .option("--include-tags <selectors>", "CSS selectors for elements to include (comma-separated)")
+  .option("--exclude-tags <selectors>", "CSS selectors for elements to exclude (comma-separated)")
   .action(async (urls: string[], options) => {
     const port = parseInt(options.port, 10);
     const useStandalone = options.standalone || false;
@@ -197,7 +199,7 @@ program
       const formats = options.format.split(",").map((f: string) => f.trim());
 
       // Validate formats
-      const validFormats = ["markdown", "html", "json", "text"];
+      const validFormats = ["markdown", "html"];
       for (const format of formats) {
         if (!validFormats.includes(format)) {
           console.error(
@@ -212,6 +214,14 @@ program
         console.error(`Formats: ${formats.join(", ")}`);
       }
 
+      // Parse tag selectors
+      const includeTags = options.includeTags
+        ? options.includeTags.split(",").map((s: string) => s.trim())
+        : undefined;
+      const excludeTags = options.excludeTags
+        ? options.excludeTags.split(",").map((s: string) => s.trim())
+        : undefined;
+
       const scrapeOptions = {
         urls,
         formats,
@@ -220,9 +230,12 @@ program
         batchTimeoutMs: parseInt(options.batchTimeout, 10),
         proxy: options.proxy ? { url: options.proxy } : undefined,
         userAgent: options.userAgent,
-        includeMetadata: options.metadata !== false,
         verbose: options.verbose || false,
         showChrome: options.showChrome || false,
+        // Content cleaning options
+        onlyMainContent: options.mainContent !== false, // --no-main-content sets this to false
+        includeTags,
+        excludeTags,
         onProgress: options.verbose
           ? ({ completed, total, currentUrl }: { completed: number; total: number; currentUrl: string }) => {
               console.error(`[${completed}/${total}] ${currentUrl}`);
@@ -234,29 +247,17 @@ program
         ? await daemonClient!.scrape(scrapeOptions)
         : await standaloneClient!.scrape(scrapeOptions);
 
-      // Build output based on requested format(s)
-      let output = "";
-
-      for (const site of result.data) {
-        if (formats.includes("markdown") && site.markdown) {
-          output += site.markdown + "\n\n";
-        } else if (formats.includes("text") && site.text) {
-          output += site.text + "\n\n";
-        } else if (formats.includes("html") && site.html) {
-          output += site.html + "\n\n";
-        } else if (formats.includes("json") && site.json) {
-          output += site.json + "\n\n";
-        }
-      }
+      // Always output JSON
+      const output = JSON.stringify(result, null, 2);
 
       // Write output
       if (options.output) {
-        writeFileSync(options.output, output.trim());
+        writeFileSync(options.output, output);
         if (options.verbose) {
           console.error(`Output written to ${options.output}`);
         }
       } else {
-        console.log(output.trim());
+        console.log(output);
       }
 
       // Print summary to stderr
@@ -293,7 +294,7 @@ program
   .option("-d, --depth <n>", "Maximum crawl depth", "1")
   .option("-m, --max-pages <n>", "Maximum pages to discover", "20")
   .option("-s, --scrape", "Also scrape content of discovered pages")
-  .option("-f, --format <formats>", "Output formats when scraping (comma-separated)", "markdown")
+  .option("-f, --format <formats>", "Content formats when scraping (comma-separated: markdown,html)", "markdown")
   .option("-o, --output <file>", "Output file (stdout if omitted)")
   .option("--delay <ms>", "Delay between requests in milliseconds", "1000")
   .option("-t, --timeout <ms>", "Total timeout for crawl operation in milliseconds")
@@ -356,48 +357,28 @@ program
         showChrome: options.showChrome || false,
       };
 
+      // Add formats to crawl options if scraping
+      const formats = options.format.split(",").map((f: string) => f.trim());
+      const crawlOptionsWithFormats = {
+        ...crawlOptions,
+        formats,
+      };
+
       const result = useDaemon
-        ? await daemonClient!.crawl(crawlOptions)
-        : await standaloneClient!.crawl(crawlOptions);
+        ? await daemonClient!.crawl(crawlOptionsWithFormats)
+        : await standaloneClient!.crawl(crawlOptionsWithFormats);
 
-      // Build output
-      let output = "";
-
-      if (options.scrape && result.scraped) {
-        // Output scraped content
-        const formats = options.format.split(",").map((f: string) => f.trim());
-
-        for (const site of result.scraped.data) {
-          if (formats.includes("markdown") && site.markdown) {
-            output += site.markdown + "\n\n";
-          } else if (formats.includes("text") && site.text) {
-            output += site.text + "\n\n";
-          } else if (formats.includes("html") && site.html) {
-            output += site.html + "\n\n";
-          } else if (formats.includes("json") && site.json) {
-            output += site.json + "\n\n";
-          }
-        }
-      } else {
-        // Output discovered URLs as JSON
-        output = JSON.stringify(
-          {
-            urls: result.urls,
-            metadata: result.metadata,
-          },
-          null,
-          2
-        );
-      }
+      // Always output JSON
+      const output = JSON.stringify(result, null, 2);
 
       // Write output
       if (options.output) {
-        writeFileSync(options.output, output.trim());
+        writeFileSync(options.output, output);
         if (options.verbose) {
           console.error(`Output written to ${options.output}`);
         }
       } else {
-        console.log(output.trim());
+        console.log(output);
       }
 
       // Print summary to stderr

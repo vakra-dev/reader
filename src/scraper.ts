@@ -3,10 +3,7 @@ import pLimit from "p-limit";
 import type { IBrowserPool } from "./browser/types";
 import { detectChallenge } from "./cloudflare/detector";
 import { waitForChallengeResolution } from "./cloudflare/handler";
-import { formatToMarkdown } from "./formatters/markdown";
-import { formatToHTML } from "./formatters/html";
-import { formatToJson } from "./formatters/json";
-import { formatToText } from "./formatters/text";
+import { htmlToMarkdown } from "./formatters/markdown";
 import { cleanContent } from "./utils/content-cleaner";
 import { extractMetadata } from "./utils/metadata-extractor";
 import { createLogger } from "./utils/logger";
@@ -17,7 +14,6 @@ import {
   type ScrapeResult,
   type WebsiteScrapeResult,
   type BatchMetadata,
-  type Page,
   type ProxyMetadata,
 } from "./types";
 
@@ -244,17 +240,10 @@ export class Scraper {
         await hero.waitForPaintingStable();
 
         // Detect and handle Cloudflare challenge
-        let hadChallenge = false;
-        let challengeType = "none";
-        let waitTimeMs = 0;
-
         const initialUrl = await hero.url;
         const detection = await detectChallenge(hero);
 
         if (detection.isChallenge) {
-          hadChallenge = true;
-          challengeType = detection.type;
-
           if (this.options.verbose) {
             this.logger.info(`Challenge detected on ${url}: ${detection.type}`);
           }
@@ -267,14 +256,12 @@ export class Scraper {
             initialUrl,
           });
 
-          waitTimeMs = result.waitedMs;
-
           if (!result.resolved) {
             throw new Error(`Challenge not resolved: ${detection.type}`);
           }
 
           if (this.options.verbose) {
-            this.logger.info(`Challenge resolved via ${result.method} in ${waitTimeMs}ms`);
+            this.logger.info(`Challenge resolved via ${result.method} in ${result.waitedMs}ms`);
           }
         }
 
@@ -294,63 +281,29 @@ export class Scraper {
         }
 
         // Extract content
-        const pageTitle = await hero.document.title;
         const html = await hero.document.documentElement.outerHTML;
 
         // Clean content with configurable options
         const cleanedHtml = cleanContent(html, url, {
           removeAds: this.options.removeAds,
           removeBase64Images: this.options.removeBase64Images,
+          onlyMainContent: this.options.onlyMainContent,
+          includeTags: this.options.includeTags,
+          excludeTags: this.options.excludeTags,
         });
 
         // Extract metadata
         const websiteMetadata = extractMetadata(cleanedHtml, url);
 
         const duration = Date.now() - startTime;
-        const scrapedAt = new Date().toISOString();
 
-        // Create Page object for formatters
-        const page: Page = {
-          url,
-          title: pageTitle,
-          markdown: "", // Will be set by formatter
-          html: cleanedHtml,
-          fetchedAt: scrapedAt,
-          depth: 0,
-          hadChallenge,
-          challengeType,
-          waitTimeMs,
-        };
-
-        // Convert to formats
+        // Convert to requested formats
         const markdown = this.options.formats.includes("markdown")
-          ? formatToMarkdown(
-              [page],
-              url,
-              scrapedAt,
-              duration,
-              websiteMetadata,
-              this.options.includeMetadata
-            )
+          ? htmlToMarkdown(cleanedHtml)
           : undefined;
 
         const htmlOutput = this.options.formats.includes("html")
-          ? formatToHTML([page], url, scrapedAt, duration, websiteMetadata)
-          : undefined;
-
-        const json = this.options.formats.includes("json")
-          ? formatToJson([page], url, scrapedAt, duration, websiteMetadata)
-          : undefined;
-
-        const text = this.options.formats.includes("text")
-          ? formatToText(
-              [page],
-              url,
-              scrapedAt,
-              duration,
-              websiteMetadata,
-              this.options.includeMetadata
-            )
+          ? cleanedHtml
           : undefined;
 
         // Report progress
@@ -391,8 +344,6 @@ export class Scraper {
         const result: WebsiteScrapeResult = {
           markdown,
           html: htmlOutput,
-          json,
-          text,
           metadata: {
             baseUrl: url,
             totalPages: 1,

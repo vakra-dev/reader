@@ -231,12 +231,41 @@ export class Crawler {
 
     // Use proper DOM API to find all anchor elements with href
     document.querySelectorAll("a[href]").forEach((anchor: Element) => {
-      const href = anchor.getAttribute("href");
+      const rawHref = anchor.getAttribute("href");
+      if (!rawHref) return;
+
+      // Trim whitespace from href
+      const href = rawHref.trim();
       if (!href) return;
 
+      // Skip fragment-only links (#, #section, etc.)
+      if (href.startsWith("#")) return;
+
+      // Skip non-HTTP schemes (javascript:, mailto:, tel:, data:, blob:, ftp:)
+      const lowerHref = href.toLowerCase();
+      if (
+        lowerHref.startsWith("javascript:") ||
+        lowerHref.startsWith("mailto:") ||
+        lowerHref.startsWith("tel:") ||
+        lowerHref.startsWith("data:") ||
+        lowerHref.startsWith("blob:") ||
+        lowerHref.startsWith("ftp:")
+      ) {
+        return;
+      }
+
       // Resolve relative URLs
-      const resolved = resolveUrl(href, baseUrl);
+      let resolved = resolveUrl(href, baseUrl);
       if (!resolved || !isValidUrl(resolved)) return;
+
+      // Strip hash fragments from URLs
+      try {
+        const parsed = new URL(resolved);
+        parsed.hash = "";
+        resolved = parsed.toString();
+      } catch {
+        return;
+      }
 
       // Check if same domain
       if (!isSameDomain(resolved, this.options.url)) return;

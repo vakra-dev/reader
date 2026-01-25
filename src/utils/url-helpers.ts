@@ -115,13 +115,54 @@ export function isSameDomain(url: string, baseUrl: string): boolean {
 
 /**
  * Generate a URL key for deduplication
+ * Normalizes:
+ * - Removes fragments (hash)
+ * - Removes search params
+ * - Removes trailing slashes (except root)
+ * - Lowercases
+ * - Normalizes www vs non-www
+ * - Removes default ports (80 for http, 443 for https)
+ * - Normalizes index files (index.html, index.htm, default.html)
  */
 export function getUrlKey(url: string): string {
   try {
     const parsedUrl = new URL(url);
+
+    // Remove hash fragments
+    parsedUrl.hash = "";
+
     // Remove search params for consistency
     parsedUrl.search = "";
-    return parsedUrl.toString().toLowerCase();
+
+    // Normalize www vs non-www (remove www. prefix for deduplication)
+    if (parsedUrl.hostname.startsWith("www.")) {
+      parsedUrl.hostname = parsedUrl.hostname.slice(4);
+    }
+
+    // Remove default ports (80 for http, 443 for https)
+    if (
+      (parsedUrl.protocol === "http:" && parsedUrl.port === "80") ||
+      (parsedUrl.protocol === "https:" && parsedUrl.port === "443")
+    ) {
+      parsedUrl.port = "";
+    }
+
+    // Normalize index files (treat /path/index.html as /path/)
+    const indexFiles = ["index.html", "index.htm", "default.html", "default.htm", "index.php"];
+    for (const indexFile of indexFiles) {
+      if (parsedUrl.pathname.endsWith(`/${indexFile}`)) {
+        parsedUrl.pathname = parsedUrl.pathname.slice(0, -indexFile.length);
+        break;
+      }
+    }
+
+    // Normalize trailing slashes (keep for root path only)
+    let normalized = parsedUrl.toString().toLowerCase();
+    if (normalized.endsWith("/") && parsedUrl.pathname !== "/") {
+      normalized = normalized.slice(0, -1);
+    }
+
+    return normalized;
   } catch {
     return url.toLowerCase();
   }

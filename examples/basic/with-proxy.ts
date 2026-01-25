@@ -48,7 +48,7 @@ async function main() {
   try {
     const result = await reader.scrape({
       urls: ["https://httpbin.org/ip"], // Shows your IP address
-      formats: ["text"],
+      formats: ["markdown"],
       proxy: proxyUrl ? { url: proxyUrl } : undefined,
     });
 
@@ -62,7 +62,7 @@ async function main() {
 
     console.log("\nScrape completed!");
     console.log("\nResponse (should show proxy IP if configured):");
-    console.log(page.text);
+    console.log(page.markdown);
   } catch (error: any) {
     console.error("Error:", error.message);
     process.exit(1);

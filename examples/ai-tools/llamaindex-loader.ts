@@ -16,14 +16,14 @@ import { Document } from "llamaindex";
 async function loadDocuments(reader: ReaderClient, urls: string[]): Promise<Document[]> {
   const result = await reader.scrape({
     urls,
-    formats: ["text", "markdown"],
+    formats: ["markdown"],
     batchConcurrency: 2,
   });
 
   return result.data.map(
     (page) =>
       new Document({
-        text: page.text || page.markdown || "",
+        text: page.markdown || "",
         metadata: {
           source: page.metadata.baseUrl,
           title: page.metadata.website.title ?? undefined,
@@ -56,7 +56,7 @@ async function crawlAndLoadDocuments(
   return result.scraped.data.map(
     (page) =>
       new Document({
-        text: page.text || page.markdown || "",
+        text: page.markdown || "",
         metadata: {
           source: page.metadata.baseUrl,
           title: page.metadata.website.title ?? undefined,

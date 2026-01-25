@@ -44,7 +44,7 @@ npx tsx crawl-website.ts https://docs.example.com
 
 ### all-formats.ts
 
-Output content in all supported formats (markdown, html, json, text).
+Output content in all supported formats (markdown, html).
 
 ```bash
 npx tsx all-formats.ts

@@ -45,7 +45,7 @@ curl -X POST http://localhost:3001/scrape \
   -H "Content-Type: application/json" \
   -d '{
     "urls": ["https://example.com"],
-    "formats": ["markdown", "text"]
+    "formats": ["markdown", "html"]
   }'
 ```
 
