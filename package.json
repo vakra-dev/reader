@@ -1,6 +1,6 @@
 {
   "name": "@vakra-dev/reader",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "description": "Open source, production grade web scraping engine for LLMs. Clean markdown output, ready for your agents.",
   "license": "Apache-2.0",
   "type": "module",
