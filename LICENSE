@@ -188,18 +188,3 @@
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
-
----
-
-Attribution Requirement
-
-All distributions, publications, or public uses of this software, in whole or in
-part, must include the following attribution in a clearly visible location (such
-as documentation, a README file, or an "About" section in any user interface):
-
-   "This product includes software developed by Nihal Kaul
-   (https://www.linkedin.com/in/nihalwashere/) as part of the Reader project
-   (https://github.com/vakra-dev/reader)."
-
-This attribution requirement is in addition to, and does not limit, any
-obligations imposed by the Apache License, Version 2.0.
