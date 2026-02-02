@@ -19,7 +19,11 @@
 </p>
 
 <p align="center">
-  If you find Reader useful, please consider giving it a star on GitHub! It helps others discover the project.
+  <a href="https://docs.reader.dev">Docs</a> · <a href="https://docs.reader.dev/home/examples">Examples</a> · <a href="https://discord.gg/6tjkq7J5WV">Discord</a>
+</p>
+
+<p align="center">
+  <img src="./docs/assets/demo.gif" alt="Reader demo — scrape any URL to clean markdown" width="700" />
 </p>
 
 ## The Problem
@@ -62,6 +66,9 @@ console.log(`Found ${pages.urls.length} pages`);
 ```
 
 All the hard stuff, browser pooling, challenge detection, proxy rotation, retries, happens under the hood. You get clean markdown. Your agents get the web.
+
+> [!TIP]
+> If Reader is useful to you, a [star on GitHub](https://github.com/vakra-dev/reader) helps others discover the project.
 
 ## Features
 
@@ -252,20 +259,20 @@ npx reader scrape https://example.com https://example.org -c 2
 npx reader scrape https://example.com -o output.md
 ```
 
-| Option                   | Type   | Default      | Description                                               |
-| ------------------------ | ------ | ------------ | --------------------------------------------------------- |
-| `-f, --format <formats>` | string | `"markdown"` | Output formats (comma-separated: markdown,html)           |
-| `-o, --output <file>`    | string | stdout       | Output file path                                          |
-| `-c, --concurrency <n>`  | number | `1`          | Parallel requests                                         |
-| `-t, --timeout <ms>`     | number | `30000`      | Request timeout in milliseconds                           |
-| `--batch-timeout <ms>`   | number | `300000`     | Total timeout for entire batch operation                  |
-| `--proxy <url>`          | string | -            | Proxy URL (e.g., http://user:pass@host:port)              |
-| `--user-agent <string>`  | string | -            | Custom user agent string                                  |
-| `--show-chrome`          | flag   | -            | Show browser window for debugging                         |
-| `--no-main-content`      | flag   | -            | Disable main content extraction (include full page)       |
-| `--include-tags <sel>`   | string | -            | CSS selectors for elements to include (comma-separated)   |
-| `--exclude-tags <sel>`   | string | -            | CSS selectors for elements to exclude (comma-separated)   |
-| `-v, --verbose`          | flag   | -            | Enable verbose logging                                    |
+| Option                   | Type   | Default      | Description                                             |
+| ------------------------ | ------ | ------------ | ------------------------------------------------------- |
+| `-f, --format <formats>` | string | `"markdown"` | Output formats (comma-separated: markdown,html)         |
+| `-o, --output <file>`    | string | stdout       | Output file path                                        |
+| `-c, --concurrency <n>`  | number | `1`          | Parallel requests                                       |
+| `-t, --timeout <ms>`     | number | `30000`      | Request timeout in milliseconds                         |
+| `--batch-timeout <ms>`   | number | `300000`     | Total timeout for entire batch operation                |
+| `--proxy <url>`          | string | -            | Proxy URL (e.g., http://user:pass@host:port)            |
+| `--user-agent <string>`  | string | -            | Custom user agent string                                |
+| `--show-chrome`          | flag   | -            | Show browser window for debugging                       |
+| `--no-main-content`      | flag   | -            | Disable main content extraction (include full page)     |
+| `--include-tags <sel>`   | string | -            | CSS selectors for elements to include (comma-separated) |
+| `--exclude-tags <sel>`   | string | -            | CSS selectors for elements to exclude (comma-separated) |
+| `-v, --verbose`          | flag   | -            | Enable verbose logging                                  |
 
 ### `reader crawl <url>`
 
@@ -355,26 +362,26 @@ await reader.close();
 
 Scrape one or more URLs. Can be used directly or via `ReaderClient`.
 
-| Option             | Type                              | Required | Default        | Description                                                     |
-| ------------------ | --------------------------------- | -------- | -------------- | --------------------------------------------------------------- |
-| `urls`             | `string[]`                        | Yes      | -              | Array of URLs to scrape                                         |
-| `formats`          | `Array<"markdown" \| "html">`     | No       | `["markdown"]` | Output formats                                                  |
-| `onlyMainContent`  | `boolean`                         | No       | `true`         | Extract only main content (removes nav/header/footer)           |
-| `includeTags`      | `string[]`                        | No       | `[]`           | CSS selectors for elements to keep                              |
-| `excludeTags`      | `string[]`                        | No       | `[]`           | CSS selectors for elements to remove                            |
-| `userAgent`        | `string`                          | No       | -              | Custom user agent string                                        |
-| `timeoutMs`        | `number`                          | No       | `30000`        | Request timeout in milliseconds                                 |
-| `includePatterns`  | `string[]`                        | No       | `[]`           | URL patterns to include (regex strings)                         |
-| `excludePatterns`  | `string[]`                        | No       | `[]`           | URL patterns to exclude (regex strings)                         |
-| `batchConcurrency` | `number`                          | No       | `1`            | Number of URLs to process in parallel                           |
-| `batchTimeoutMs`   | `number`                          | No       | `300000`       | Total timeout for entire batch operation                        |
-| `maxRetries`       | `number`                          | No       | `2`            | Maximum retry attempts for failed URLs                          |
-| `onProgress`       | `function`                        | No       | -              | Progress callback: `({ completed, total, currentUrl }) => void` |
-| `proxy`            | `ProxyConfig`                     | No       | -              | Proxy configuration object                                      |
-| `waitForSelector`  | `string`                          | No       | -              | CSS selector to wait for before page is loaded                  |
-| `verbose`          | `boolean`                         | No       | `false`        | Enable verbose logging                                          |
-| `showChrome`       | `boolean`                         | No       | `false`        | Show Chrome window for debugging                                |
-| `connectionToCore` | `any`                             | No       | -              | Connection to shared Hero Core (for production)                 |
+| Option             | Type                          | Required | Default        | Description                                                     |
+| ------------------ | ----------------------------- | -------- | -------------- | --------------------------------------------------------------- |
+| `urls`             | `string[]`                    | Yes      | -              | Array of URLs to scrape                                         |
+| `formats`          | `Array<"markdown" \| "html">` | No       | `["markdown"]` | Output formats                                                  |
+| `onlyMainContent`  | `boolean`                     | No       | `true`         | Extract only main content (removes nav/header/footer)           |
+| `includeTags`      | `string[]`                    | No       | `[]`           | CSS selectors for elements to keep                              |
+| `excludeTags`      | `string[]`                    | No       | `[]`           | CSS selectors for elements to remove                            |
+| `userAgent`        | `string`                      | No       | -              | Custom user agent string                                        |
+| `timeoutMs`        | `number`                      | No       | `30000`        | Request timeout in milliseconds                                 |
+| `includePatterns`  | `string[]`                    | No       | `[]`           | URL patterns to include (regex strings)                         |
+| `excludePatterns`  | `string[]`                    | No       | `[]`           | URL patterns to exclude (regex strings)                         |
+| `batchConcurrency` | `number`                      | No       | `1`            | Number of URLs to process in parallel                           |
+| `batchTimeoutMs`   | `number`                      | No       | `300000`       | Total timeout for entire batch operation                        |
+| `maxRetries`       | `number`                      | No       | `2`            | Maximum retry attempts for failed URLs                          |
+| `onProgress`       | `function`                    | No       | -              | Progress callback: `({ completed, total, currentUrl }) => void` |
+| `proxy`            | `ProxyConfig`                 | No       | -              | Proxy configuration object                                      |
+| `waitForSelector`  | `string`                      | No       | -              | CSS selector to wait for before page is loaded                  |
+| `verbose`          | `boolean`                     | No       | `false`        | Enable verbose logging                                          |
+| `showChrome`       | `boolean`                     | No       | `false`        | Show Chrome window for debugging                                |
+| `connectionToCore` | `any`                         | No       | -              | Connection to shared Hero Core (for production)                 |
 
 **Returns:** `Promise<ScrapeResult>`
 
@@ -582,13 +589,13 @@ When you're scraping the web, you encounter messy, malformed HTML that breaks mo
 
 **What supermarkdown offers:**
 
-| Feature | Benefit |
-|---------|---------|
-| **Written in Rust** | Native performance with Node.js bindings via napi-rs |
-| **Full GFM support** | Tables, task lists, strikethrough, autolinks |
-| **LLM-optimized** | Clean output designed for AI consumption |
-| **Battle-tested** | Handles malformed HTML from real web pages |
-| **CSS selectors** | Include/exclude elements during conversion |
+| Feature              | Benefit                                              |
+| -------------------- | ---------------------------------------------------- |
+| **Written in Rust**  | Native performance with Node.js bindings via napi-rs |
+| **Full GFM support** | Tables, task lists, strikethrough, autolinks         |
+| **LLM-optimized**    | Clean output designed for AI consumption             |
+| **Battle-tested**    | Handles malformed HTML from real web pages           |
+| **CSS selectors**    | Include/exclude elements during conversion           |
 
 supermarkdown is open source and available as both a Rust crate and npm package:
 
@@ -602,32 +609,24 @@ cargo add supermarkdown
 
 Check out the [supermarkdown repository](https://github.com/vakra-dev/supermarkdown) for examples and documentation.
 
+## Server Deployment
+
+Reader uses a real Chromium browser under the hood. On headless Linux servers (VPS, EC2, etc.), you need to install Chrome's system dependencies:
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+  libcups2 libxcb1 libatspi2.0-0 libx11-6 libxcomposite1 libxdamage1 \
+  libxext6 libxfixes3 libxrandr2 libgbm1 libcairo2 libpango-1.0-0 libasound2
+```
+
+This is the same requirement that Puppeteer and Playwright have on headless Linux. macOS, Windows, and Linux desktops already have these libraries.
+
+For Docker and production deployment guides, see the [deployment documentation](https://docs.reader.dev/documentation/guides/deployment).
+
 ## Documentation
 
-| Guide                                      | Description                    |
-| ------------------------------------------ | ------------------------------ |
-| [Getting Started](docs/getting-started.md) | Detailed setup and first steps |
-| [Architecture](docs/architecture.md)       | System design and data flow    |
-| [API Reference](docs/api-reference.md)     | Complete API documentation     |
-| [Troubleshooting](docs/troubleshooting.md) | Common errors and solutions    |
-
-### Guides
-
-| Guide                                                     | Description                   |
-| --------------------------------------------------------- | ----------------------------- |
-| [Cloudflare Bypass](docs/guides/cloudflare-bypass.md)     | How antibot bypass works      |
-| [Proxy Configuration](docs/guides/proxy-configuration.md) | Setting up proxies            |
-| [Browser Pool](docs/guides/browser-pool.md)               | Production browser management |
-| [Output Formats](docs/guides/output-formats.md)           | Understanding output formats  |
-
-### Deployment
-
-| Guide                                                     | Description                |
-| --------------------------------------------------------- | -------------------------- |
-| [Docker](docs/deployment/docker.md)                       | Container deployment       |
-| [Production Server](docs/deployment/production-server.md) | Express + shared Hero Core |
-| [Job Queues](docs/deployment/job-queues.md)               | BullMQ async scheduling    |
-| [Serverless](docs/deployment/serverless.md)               | Lambda, Vercel, Workers    |
+Full documentation is available at **[docs.reader.dev](https://docs.reader.dev)**, including guides for scraping, crawling, proxy configuration, browser pool management, and deployment.
 
 ### Examples
 
@@ -688,4 +687,5 @@ If you use Reader in your research or project, please cite it:
 ## Support
 
 - [GitHub Issues](https://github.com/vakra-dev/reader/issues)
-- [Documentation](https://github.com/vakra-dev/reader)
+- [Documentation](https://docs.reader.dev)
+- [Discord](https://discord.gg/6tjkq7J5WV)
