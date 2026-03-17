@@ -69,12 +69,24 @@ export { rateLimit } from "./utils/rate-limiter";
 // =============================================================================
 export { BrowserPool, HeroBrowserPool } from "./browser/pool";
 export { createHeroConfig } from "./browser/hero-config";
+export { BrowserSession } from "./browser/session";
+export { RefManager } from "./browser/refs";
 export type {
   IBrowserPool,
   PoolConfig,
   BrowserInstance,
   PoolStats,
   HealthStatus,
+  SessionCreateOptions,
+  NavigationResult,
+  ElementInfo,
+  ConsoleEntry,
+  NetworkEntry,
+  DialogEntry,
+  CookieEntry,
+  SnapshotOptions,
+  ScreenshotOptions,
+  ElementRef,
 } from "./browser/types";
 
 // =============================================================================

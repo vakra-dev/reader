@@ -409,6 +409,568 @@ program
   });
 
 // =============================================================================
+// Session Commands
+// =============================================================================
+
+/**
+ * Helper to get a daemon client, exiting if daemon isn't running
+ */
+async function requireDaemon(port: number): Promise<InstanceType<typeof DaemonClient>> {
+  const client = new DaemonClient({ port });
+  if (!(await client.isRunning())) {
+    console.error("Error: Daemon is not running. Start it with: reader start");
+    process.exit(1);
+  }
+  return client;
+}
+
+const session = program
+  .command("session")
+  .description("Interactive browser session commands (requires daemon)");
+
+session
+  .command("create")
+  .description("Create a new browser session")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .option("--viewport <WxH>", "Viewport size (e.g., 1920x1080)")
+  .action(async (options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      let createOpts: any = {};
+      if (options.viewport) {
+        const [w, h] = options.viewport.split("x").map(Number);
+        createOpts = { viewportWidth: w, viewportHeight: h };
+      }
+      const { sessionId } = await client.sessionCreate(createOpts);
+      console.log(sessionId);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("close <id>")
+  .description("Close a browser session")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      await client.sessionClose(id);
+      console.log("Session closed");
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("list")
+  .description("List active sessions")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const sessions = await client.sessionList();
+      if (sessions.length === 0) {
+        console.log("No active sessions");
+      } else {
+        for (const s of sessions) {
+          const idle = Math.round((Date.now() - s.lastActivity) / 1000);
+          console.log(`${s.id}  idle: ${idle}s`);
+        }
+      }
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("goto <id> <url>")
+  .description("Navigate to a URL")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .option("-t, --timeout <ms>", "Navigation timeout", "30000")
+  .action(async (id, url, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const result = await client.sessionGoto(id, url, parseInt(options.timeout, 10));
+      console.log(result.title);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("back <id>")
+  .description("Navigate back")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { url } = await client.sessionBack(id);
+      console.log(url);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("forward <id>")
+  .description("Navigate forward")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { url } = await client.sessionForward(id);
+      console.log(url);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("reload <id>")
+  .description("Reload the page")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      await client.sessionReload(id);
+      console.log("Reloaded");
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("url <id>")
+  .description("Get current URL")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { url } = await client.sessionUrl(id);
+      console.log(url);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("snapshot <id>")
+  .description("Take accessibility tree snapshot with @e refs")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .option("-i, --interactive", "Show interactive elements only")
+  .option("-D, --diff", "Show diff against previous snapshot")
+  .option("-s, --selector <sel>", "Scope to CSS selector")
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { snapshot } = await client.sessionSnapshot(id, {
+        interactive: options.interactive,
+        diff: options.diff,
+        selector: options.selector,
+      });
+      console.log(snapshot);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("click <id> <selector>")
+  .description("Click an element (CSS selector or @e ref)")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, selector, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      await client.sessionClick(id, selector);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("fill <id> <selector> <value>")
+  .description("Fill an input (CSS selector or @e ref)")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, selector, value, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      await client.sessionFill(id, selector, value);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("type <id> <text>")
+  .description("Type text into focused element")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, text, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      await client.sessionType(id, text);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("press <id> <key>")
+  .description("Press a key (Enter, Tab, Escape, etc.)")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, key, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      await client.sessionPress(id, key);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("hover <id> <selector>")
+  .description("Hover over an element")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, selector, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      await client.sessionHover(id, selector);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("select <id> <selector> <value>")
+  .description("Select a dropdown option")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, selector, value, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      await client.sessionSelect(id, selector, value);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("scroll <id> [selector]")
+  .description("Scroll element into view or scroll to bottom")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, selector, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      await client.sessionScroll(id, selector);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("upload <id> <selector> <file>")
+  .description("Upload a file to an input")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, selector, file, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      await client.sessionUpload(id, selector, [file]);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("screenshot <id>")
+  .description("Take a screenshot")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .requiredOption("-o, --output <path>", "Output file path")
+  .option("--annotate", "Overlay @e ref labels on elements")
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { screenshot } = await client.sessionScreenshot(id, {
+        path: options.output,
+        annotate: options.annotate,
+        format: options.output.endsWith(".jpg") || options.output.endsWith(".jpeg") ? "jpeg" : "png",
+      });
+      // Daemon returns base64; we need to save locally if daemon is remote
+      // For local daemon, the session already saved to path
+      // But write here too as a safety net
+      const { writeFileSync: wf } = await import("fs");
+      wf(options.output, Buffer.from(screenshot, "base64"));
+      console.log(options.output);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("responsive <id>")
+  .description("Take screenshots at mobile, tablet, and desktop viewports")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .requiredOption("-o, --output <prefix>", "Output file prefix")
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { paths } = await client.sessionResponsive(id, options.output);
+      for (const p of paths) {
+        console.log(p);
+      }
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("html <id> [selector]")
+  .description("Get page HTML")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, selector, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { html } = await client.sessionHtml(id, selector);
+      console.log(html);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("markdown <id>")
+  .description("Get page as cleaned markdown")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { markdown } = await client.sessionMarkdown(id);
+      console.log(markdown);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("text <id>")
+  .description("Get page text content")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { text } = await client.sessionText(id);
+      console.log(text);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("links <id>")
+  .description("List all links on the page")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { links } = await client.sessionLinks(id);
+      for (const link of links) {
+        console.log(`${link.text} → ${link.href}`);
+      }
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("is <id> <check> <selector>")
+  .description("Check element state (visible, enabled, checked)")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, check, selector, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { result } = await client.sessionIs(id, check as any, selector);
+      console.log(String(result));
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("console <id>")
+  .description("Get console messages")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .option("--errors", "Show errors and warnings only")
+  .option("--clear", "Clear buffer after reading")
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { entries } = await client.sessionConsole(id, {
+        errors: options.errors,
+        clear: options.clear,
+      });
+      for (const entry of entries) {
+        console.log(`[${entry.level}] ${entry.text}`);
+      }
+      if (entries.length === 0) {
+        console.log("(no console messages)");
+      }
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("network <id>")
+  .description("Get network requests")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .option("--errors", "Show 4xx/5xx responses only")
+  .option("--clear", "Clear buffer after reading")
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { entries } = await client.sessionNetwork(id, {
+        errors: options.errors,
+        clear: options.clear,
+      });
+      for (const entry of entries) {
+        console.log(`${entry.status} ${entry.method} ${entry.url}`);
+      }
+      if (entries.length === 0) {
+        console.log("(no network requests)");
+      }
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("dialog <id>")
+  .description("Get dialog events")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .option("--clear", "Clear buffer after reading")
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { entries } = await client.sessionDialog(id, {
+        clear: options.clear,
+      });
+      for (const entry of entries) {
+        console.log(`[${entry.type}] ${entry.message}`);
+      }
+      if (entries.length === 0) {
+        console.log("(no dialogs)");
+      }
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("dialog-accept <id> [text]")
+  .description("Set dialog mode to auto-accept")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, text, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      await client.sessionDialogMode(id, "accept", text);
+      console.log("Dialog mode: accept");
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("dialog-dismiss <id>")
+  .description("Set dialog mode to auto-dismiss")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      await client.sessionDialogMode(id, "dismiss");
+      console.log("Dialog mode: dismiss");
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("cookies <id>")
+  .description("Get page cookies")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { cookies } = await client.sessionCookies(id);
+      console.log(JSON.stringify(cookies, null, 2));
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("js <id> <expression>")
+  .description("Evaluate JavaScript in page context")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, expression, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const { result } = await client.sessionJs(id, expression);
+      console.log(result);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+session
+  .command("viewport <id> <size>")
+  .description("Set viewport size (e.g., 375x812)")
+  .option("-p, --port <n>", `Daemon port`, String(DEFAULT_DAEMON_PORT))
+  .action(async (id, size, options) => {
+    const client = await requireDaemon(parseInt(options.port, 10));
+    try {
+      const [w, h] = size.split("x").map(Number);
+      if (!w || !h) {
+        console.error("Error: Size must be in WxH format (e.g., 375x812)");
+        process.exit(1);
+      }
+      await client.sessionViewport(id, w, h);
+      console.log(`Viewport set to ${w}x${h}`);
+    } catch (error: any) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+// =============================================================================
 // Parse and execute
 // =============================================================================
 

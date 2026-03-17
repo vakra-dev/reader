@@ -304,6 +304,13 @@ export class ReaderClient {
   }
 
   /**
+   * Get the browser pool instance (for creating interactive sessions)
+   */
+  getPool(): HeroBrowserPool | null {
+    return this.pool;
+  }
+
+  /**
    * Close the client and release resources
    *
    * Note: This is optional - the client will auto-close on process exit.

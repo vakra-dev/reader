@@ -109,6 +109,150 @@ export interface HealthStatus {
   stats: PoolStats;
 }
 
+// =============================================================================
+// Session types
+// =============================================================================
+
+/**
+ * Options for creating a browser session
+ */
+export interface SessionCreateOptions {
+  /** Viewport width (default: 1920) */
+  viewportWidth?: number;
+  /** Viewport height (default: 1080) */
+  viewportHeight?: number;
+}
+
+/**
+ * Navigation result
+ */
+export interface NavigationResult {
+  url: string;
+  title: string;
+}
+
+/**
+ * Information about a DOM element
+ */
+export interface ElementInfo {
+  /** Element tag name */
+  tag: string;
+  /** ARIA role or inferred role */
+  role: string;
+  /** Visible text content */
+  text: string;
+  /** Whether the element is visible */
+  visible: boolean;
+  /** Element attributes */
+  attributes: Record<string, string>;
+  /** Assigned @e ref (if snapshot was taken) */
+  ref?: string;
+}
+
+/**
+ * Console message captured during session
+ */
+export interface ConsoleEntry {
+  /** Console level */
+  level: "log" | "warn" | "error" | "info" | "debug";
+  /** Message text */
+  text: string;
+  /** Source URL */
+  url: string;
+  /** Timestamp */
+  timestamp: Date;
+}
+
+/**
+ * Network request captured during session
+ */
+export interface NetworkEntry {
+  /** Request URL */
+  url: string;
+  /** HTTP method */
+  method: string;
+  /** Response status code */
+  status: number;
+  /** Resource type */
+  type: string;
+  /** Duration in milliseconds */
+  duration: number;
+  /** Timestamp */
+  timestamp: Date;
+}
+
+/**
+ * Dialog event captured during session
+ */
+export interface DialogEntry {
+  /** Dialog type */
+  type: "alert" | "confirm" | "prompt" | "beforeunload";
+  /** Dialog message */
+  message: string;
+  /** Timestamp */
+  timestamp: Date;
+}
+
+/**
+ * Cookie entry
+ */
+export interface CookieEntry {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  sameSite: string;
+  expires?: string;
+}
+
+/**
+ * Options for taking a snapshot
+ */
+export interface SnapshotOptions {
+  /** Only show interactive elements */
+  interactive?: boolean;
+  /** Return diff against previous snapshot */
+  diff?: boolean;
+  /** Scope to CSS selector */
+  selector?: string;
+}
+
+/**
+ * Options for taking a screenshot
+ */
+export interface ScreenshotOptions {
+  /** Save to file path */
+  path?: string;
+  /** Overlay @e ref labels on interactive elements */
+  annotate?: boolean;
+  /** Image format */
+  format?: "png" | "jpeg";
+  /** Full page screenshot */
+  fullPage?: boolean;
+}
+
+/**
+ * Stored element reference for the @e ref system
+ */
+export interface ElementRef {
+  /** The @e ref identifier (e.g., "@e1") */
+  ref: string;
+  /** CSS selector to find the element */
+  selector: string;
+  /** XPath as fallback */
+  xpath: string;
+  /** Element tag */
+  tag: string;
+  /** Element role */
+  role: string;
+  /** Visible text */
+  text: string;
+  /** Bounding box for annotations */
+  boundingBox?: { x: number; y: number; width: number; height: number };
+}
+
 /**
  * Browser pool interface
  */

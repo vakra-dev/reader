@@ -7,3 +7,5 @@ export type { DaemonServerOptions, DaemonStatus } from "./server";
 
 export { DaemonClient, isDaemonRunning } from "./client";
 export type { DaemonClientOptions } from "./client";
+
+export type { SessionRequest, SessionInfo } from "./types";
