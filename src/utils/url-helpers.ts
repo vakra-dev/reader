@@ -65,49 +65,18 @@ export function extractBaseDomain(url: string): string {
 }
 
 /**
- * Extract the root domain from a hostname (e.g., "blog.example.com" -> "example.com")
- */
-function getRootDomain(hostname: string): string {
-  const parts = hostname.split(".");
-
-  // Handle edge cases
-  if (parts.length <= 2) {
-    return hostname;
-  }
-
-  // Handle common two-part TLDs (co.uk, com.au, etc.)
-  const twoPartTLDs = ["co.uk", "com.au", "co.nz", "com.br", "co.jp", "co.kr", "com.mx", "org.uk"];
-  const lastTwo = parts.slice(-2).join(".");
-
-  if (twoPartTLDs.includes(lastTwo)) {
-    // Return last 3 parts for two-part TLDs
-    return parts.slice(-3).join(".");
-  }
-
-  // Standard case: return last 2 parts
-  return parts.slice(-2).join(".");
-}
-
-/**
- * Check if a URL belongs to the same domain as the base URL
- * Supports subdomains: blog.example.com matches example.com
+ * Check if a URL belongs to the same domain as the base URL.
+ *
+ * Strict hostname match — `dashboard.stripe.com` does NOT match
+ * `docs.stripe.com`. The only normalization is stripping `www.`.
+ * Crawlers should stay on the exact hostname they were seeded with.
  */
 export function isSameDomain(url: string, baseUrl: string): boolean {
   try {
-    const urlDomain = extractBaseDomain(url);
-    const baseDomain = extractBaseDomain(baseUrl);
+    const urlHost = extractBaseDomain(url).replace(/^www\./, "");
+    const baseHost = extractBaseDomain(baseUrl).replace(/^www\./, "");
 
-    // Exact match
-    if (urlDomain === baseDomain) {
-      return true;
-    }
-
-    // Check if URL is a subdomain of base domain
-    // e.g., "blog.example.com" should match "example.com"
-    const urlRoot = getRootDomain(urlDomain);
-    const baseRoot = getRootDomain(baseDomain);
-
-    return urlRoot === baseRoot;
+    return urlHost === baseHost;
   } catch {
     return false;
   }

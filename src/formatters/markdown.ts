@@ -4,13 +4,6 @@ import { logger } from "../utils/logger.js";
 const log = logger.child({ name: "markdown" });
 
 /**
- * Maximum time to allow for a single markdown conversion.
- * If supermarkdown takes longer than this, we fall back to text extraction.
- * This prevents the engine from hanging on pathological HTML inputs.
- */
-const CONVERSION_TIMEOUT_MS = 10_000;
-
-/**
  * Convert HTML to Markdown
  *
  * Simple conversion without any headers, metadata, or formatting wrappers.

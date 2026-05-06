@@ -1,4 +1,4 @@
-import type { ScrapeResult, ProxyConfig } from "./types";
+import type { ScrapeResult, ProxyConfig, ProxyTier } from "./types";
 import type { IBrowserPool } from "./browser/types";
 
 /**
@@ -56,6 +56,9 @@ export interface CrawlOptions {
   /** Proxy configuration for Hero */
   proxy?: ProxyConfig;
 
+  /** Proxy tier selection (default: "auto") */
+  proxyTier?: ProxyTier;
+
   /** Custom user agent string */
   userAgent?: string;
 
@@ -68,8 +71,36 @@ export interface CrawlOptions {
   /** Connection to Hero Core (for shared Core usage) */
   connectionToCore?: any;
 
-  /** Browser pool instance (internal, provided by ReaderClient) */
+  /** Legacy single browser pool (internal). Kept for backward-compat during the migration. */
   pool?: IBrowserPool;
+
+  /**
+   * Tiered browser pool (internal, provided by ReaderClient).
+   *
+   * When present, the crawler uses this instead of the legacy `pool`.
+   * Typed as `unknown` to avoid a type cycle; the crawler casts it to
+   * TieredBrowserPool at the use site.
+   */
+  tieredPool?: unknown;
+
+  /**
+   * Per-proxy concurrency gate (internal, provided by ReaderClient).
+   *
+   * When present, the crawler wraps every fetchPage in `proxyGate.withSlot`
+   * the same way the scraper does. Typed as `unknown` to avoid a cycle.
+   */
+  proxyGate?: unknown;
+
+  /**
+   * Per-proxy health tracker (internal, provided by ReaderClient).
+   */
+  healthTracker?: unknown;
+
+  /**
+   * Callback that resolves a proxy URL for a given tier. Provided by
+   * ReaderClient. Used per-fetch so escalation works.
+   */
+  resolveProxy?: (tier: ProxyTier | undefined) => ProxyConfig | undefined;
 }
 
 /**

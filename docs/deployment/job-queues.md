@@ -51,7 +51,7 @@ export const scrapeQueue = new Queue("scrape", { connection });
 // Job data interface
 interface ScrapeJobData {
   urls: string[];
-  formats: ("markdown" | "html" | "json" | "text")[];
+  formats: ("markdown" | "html")[];
   callbackUrl?: string;
 }
 

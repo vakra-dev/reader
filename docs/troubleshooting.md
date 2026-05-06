@@ -301,17 +301,9 @@ This opens a visible Chrome window so you can see:
 - Cloudflare challenges appearing
 - JavaScript errors in DevTools
 
-### Check Challenge Detection
+### Enable Verbose Logging
 
-```typescript
-import { detectChallenge } from "@vakra-dev/reader";
-
-// In your scraping logic
-const detection = await detectChallenge(hero);
-console.log("Challenge detected:", detection.isChallenge);
-console.log("Challenge type:", detection.type);
-console.log("Detection signals:", detection.signals);
-```
+Challenge detection and resolution happens automatically. Enable verbose logging to see what's happening:
 
 ### Log Progress
 

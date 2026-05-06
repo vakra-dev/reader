@@ -9,10 +9,18 @@ export interface HeroConfigOptions {
   proxy?: ProxyConfig;
   /** Show Chrome window (default: false) */
   showChrome?: boolean;
-  /** Custom user agent */
-  userAgent?: string;
+  /** IANA timezone ID to match proxy exit location (default: America/New_York) */
+  timezoneId?: string;
   /** Connection to Core (for in-process Core) */
   connectionToCore?: any;
+  /**
+   * Custom user agent string. Overrides Hero's default emulated UA.
+   *
+   * WARNING: Hero's default UA is matched to the Chromium TLS fingerprint.
+   * Overriding it can cause TLS/UA mismatches that anti-bot systems detect.
+   * Only set this if you know the target site doesn't check TLS fingerprints.
+   */
+  userAgent?: string;
 }
 
 /**
@@ -75,7 +83,7 @@ export function createHeroConfig(options: HeroConfigOptions = {}): any {
     // Locale and timezone
     // ============================================================================
     locale: "en-US",
-    timezoneId: "America/New_York",
+    timezoneId: options.proxy?.timezoneId ?? options.timezoneId ?? "America/New_York",
 
     // ============================================================================
     // Viewport (standard desktop size)
@@ -86,14 +94,14 @@ export function createHeroConfig(options: HeroConfigOptions = {}): any {
     },
 
     // ============================================================================
-    // User agent (if provided)
-    // ============================================================================
-    ...(options.userAgent && { userAgent: options.userAgent }),
-
-    // ============================================================================
     // Connection to Core (if provided)
     // ============================================================================
     ...(options.connectionToCore && { connectionToCore: options.connectionToCore }),
+
+    // ============================================================================
+    // User agent override (if provided)
+    // ============================================================================
+    ...(options.userAgent && { userAgentString: options.userAgent }),
   };
 
   // ============================================================================

@@ -188,7 +188,7 @@ import { z } from "zod";
 
 const scrapeSchema = z.object({
   urls: z.array(z.string().url()).min(1).max(100),
-  formats: z.array(z.enum(["markdown", "html", "json", "text"])).optional(),
+  formats: z.array(z.enum(["markdown", "html"])).optional(),
   batchConcurrency: z.number().min(1).max(10).optional(),
 });
 

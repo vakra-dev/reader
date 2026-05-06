@@ -2,73 +2,60 @@
 
 Simple examples demonstrating core Reader functionality.
 
-## Prerequisites
-
-Before running examples, start Ulixee Cloud in a separate terminal:
-
-```bash
-npx @ulixee/cloud start
-```
-
-For production server usage with shared Core, see [examples/production/express-server](../production/express-server/).
-
-## Examples
-
-### basic-scrape.ts
-
-Scrape a single URL and display the results.
-
-```bash
-npx tsx basic-scrape.ts
-```
-
-### batch-scrape.ts
-
-Scrape multiple URLs concurrently.
-
-```bash
-npx tsx batch-scrape.ts
-```
-
-### crawl-website.ts
-
-Crawl a website to discover and scrape pages.
-
-```bash
-# Crawl example.com
-npx tsx crawl-website.ts
-
-# Crawl a specific URL
-npx tsx crawl-website.ts https://docs.example.com
-```
-
-### all-formats.ts
-
-Output content in all supported formats (markdown, html).
-
-```bash
-npx tsx all-formats.ts
-```
-
-### with-proxy.ts
-
-Scrape using a proxy server.
-
-```bash
-# Set proxy URL
-export PROXY_URL="http://user:pass@proxy.example.com:8080"
-npx tsx with-proxy.ts
-```
-
 ## Running Examples
 
-1. Install dependencies in the examples folder:
-   ```bash
-   cd examples
-   npm install
-   ```
+All commands run from the `reader` directory. Requires Node v22+ (`nvm use v22`).
 
-2. Run any example:
-   ```bash
-   npx tsx <example-name>.ts
-   ```
+```bash
+npx tsx --tsconfig examples/tsconfig.json examples/basic/<example>.ts
+```
+
+If Hero's bundled Chrome binary isn't available (e.g. Apple Silicon), point to your local Chrome:
+
+```bash
+export CHROME_139_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+```
+
+## Scraping
+
+| Example | Description |
+|---------|-------------|
+| `basic-scrape.ts` | Scrape a single URL and display markdown output |
+| `batch-scrape.ts` | Scrape multiple URLs concurrently with progress tracking |
+| `all-formats.ts` | Output content in all supported formats (markdown, html) |
+
+## Crawling
+
+| Example | Description |
+|---------|-------------|
+| `crawl-website.ts` | Crawl a website to discover and optionally scrape pages |
+
+## Browser Sessions
+
+Browser sessions launch a stealthed Chrome and return a CDP WebSocket URL.
+Connect with Playwright, Puppeteer, or any CDP client. Anti-bot stealth is
+active (`webdriver=false`, navigator spoofing, WebRTC masking).
+
+| Example | Description |
+|---------|-------------|
+| `browser-session.ts` | Playwright: navigate, extract data, screenshot |
+| `browser-session-actions.ts` | Playwright: click, type, search, wait for elements |
+| `browser-session-puppeteer.ts` | Puppeteer: same flow via `connect({ browserWSEndpoint })` |
+| `browser-session-selenium.ts` | Raw CDP: direct WebSocket commands, no framework needed |
+
+### Dependencies
+
+```bash
+npm install --save-dev playwright-core   # for Playwright examples
+npm install --save-dev puppeteer-core    # for Puppeteer example
+npm install --save-dev ws                # for raw CDP example
+```
+
+## Configuration
+
+| Example | Description |
+|---------|-------------|
+| `with-proxy.ts` | Scrape using a proxy server |
+| `proxy-pool.ts` | Rotate through multiple proxies |
+| `browser-pool-config.ts` | Configure pool size, retirement, and queue limits |
+| `cloudflare-bypass.ts` | Scrape a Cloudflare-protected site |

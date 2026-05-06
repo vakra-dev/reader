@@ -23,8 +23,20 @@ import { TransportBridge } from "@ulixee/net";
 import { ConnectionToHeroCore } from "@ulixee/hero";
 import { scrape } from "./scraper";
 import { crawl } from "./crawler";
-import { HeroBrowserPool } from "./browser/pool";
-import type { ScrapeOptions, ScrapeResult, ProxyConfig, BrowserPoolConfig } from "./types";
+import { createBrowserSession } from "./browser-session";
+import type { BrowserOptions, BrowserSession } from "./browser-types";
+import { TieredBrowserPool, buildTierConfigsFromPools } from "./browser/tiered-pool";
+import type { HeroFactory } from "./browser/proxy-bound-browser";
+import { PerProxyGate } from "./proxy/proxy-gate";
+import { ProxyHealthTracker } from "./proxy/health-tracker";
+import type {
+  ScrapeOptions,
+  ScrapeResult,
+  ProxyConfig,
+  ProxyPoolConfig,
+  BrowserPoolConfig,
+  ProxyTier,
+} from "./types";
 import type { CrawlOptions, CrawlResult } from "./crawl-types";
 import { createLogger } from "./utils/logger";
 
@@ -47,11 +59,32 @@ export interface ReaderClientOptions {
   /** Browser pool configuration */
   browserPool?: BrowserPoolConfig;
 
-  /** List of proxies to rotate through */
+  /** List of proxies to rotate through (legacy — use proxyPools for tier-based) */
   proxies?: ProxyConfig[];
+
+  /**
+   * Multi-tier proxy pools.
+   * When configured, proxy selection is based on the `proxyTier` option per-request.
+   *
+   * @example
+   * proxyPools: {
+   *   datacenter: [{ url: "http://dc-proxy:port" }],
+   *   residential: [{ url: "http://res-proxy:port" }],
+   * }
+   */
+  proxyPools?: ProxyPoolConfig;
 
   /** Proxy rotation strategy (default: "round-robin") */
   proxyRotation?: ProxyRotation;
+
+  /**
+   * Custom user agent string. Overrides Hero's default emulated UA.
+   * Applied to all browsers in the pool.
+   *
+   * WARNING: Hero's default UA matches the Chromium TLS fingerprint.
+   * Overriding can cause TLS/UA mismatches detected by anti-bot systems.
+   */
+  userAgent?: string;
 
   /** Skip TLS/SSL certificate verification (default: true) */
   skipTLSVerification?: boolean;
@@ -63,13 +96,16 @@ export interface ReaderClientOptions {
  */
 export class ReaderClient {
   private heroCore: HeroCore | null = null;
-  private pool: HeroBrowserPool | null = null;
+  private tieredPool: TieredBrowserPool | null = null;
+  private proxyGate: PerProxyGate | null = null;
+  private healthTracker: ProxyHealthTracker | null = null;
   private initialized = false;
   private initializing: Promise<void> | null = null;
   private closed = false;
   private options: ReaderClientOptions;
   private proxyIndex = 0;
   private cleanupHandler: (() => Promise<void>) | null = null;
+  private activeSessions = new Map<string, BrowserSession>();
 
   constructor(options: ReaderClientOptions = {}) {
     this.options = options;
@@ -87,7 +123,7 @@ export class ReaderClient {
   }
 
   /**
-   * Get the next proxy from the rotation pool
+   * Get the next proxy from the legacy rotation pool
    */
   private getNextProxy(): ProxyConfig | undefined {
     const { proxies, proxyRotation = "round-robin" } = this.options;
@@ -104,6 +140,64 @@ export class ReaderClient {
     const proxy = proxies[this.proxyIndex % proxies.length];
     this.proxyIndex++;
     return proxy;
+  }
+
+  /**
+   * Get a proxy from a specific tier pool.
+   * Falls back to legacy proxy pool if tier pools not configured.
+   */
+  getProxyForTier(tier: "datacenter" | "residential"): ProxyConfig | undefined {
+    const pools = this.options.proxyPools;
+
+    if (pools) {
+      const pool = tier === "residential" ? pools.residential : pools.datacenter;
+      if (pool && pool.length > 0) {
+        // Round-robin within the tier pool
+        const idx = this.proxyIndex % pool.length;
+        this.proxyIndex++;
+        return pool[idx];
+      }
+    }
+
+    // Fallback to legacy proxies
+    return this.getNextProxy();
+  }
+
+  /**
+   * Resolve which proxy to use based on tier preference.
+   *
+   * Priority: proxyTier pool > legacy proxy rotation > undefined
+   *
+   * For "auto" tier: starts with datacenter (caller handles escalation on block detection).
+   */
+  private resolveProxy(proxyTier?: import("./types").ProxyTier): ProxyConfig | undefined {
+    if (!proxyTier || proxyTier === "auto") {
+      // Auto: prefer datacenter pool if available, else legacy rotation
+      if (this.hasProxyTier("datacenter")) {
+        return this.getProxyForTier("datacenter");
+      }
+      return this.getNextProxy();
+    }
+
+    if (proxyTier === "residential" || proxyTier === "datacenter") {
+      if (this.hasProxyTier(proxyTier)) {
+        return this.getProxyForTier(proxyTier);
+      }
+      // Tier requested but not configured — fall back to legacy
+      return this.getNextProxy();
+    }
+
+    return this.getNextProxy();
+  }
+
+  /**
+   * Check if a proxy tier is available
+   */
+  hasProxyTier(tier: "datacenter" | "residential"): boolean {
+    const pools = this.options.proxyPools;
+    if (!pools) return false;
+    const pool = tier === "residential" ? pools.residential : pools.datacenter;
+    return !!pool && pool.length > 0;
   }
 
   /**
@@ -131,7 +225,18 @@ export class ReaderClient {
   }
 
   /**
-   * Internal initialization logic
+   * Internal initialization logic.
+   *
+   * Builds (in order):
+   *   1. HeroCore  - shared Hero runtime for every browser in every tier.
+   *   2. PerProxyGate  - scraper-boundary concurrency cap keyed by proxy URL.
+   *   3. ProxyHealthTracker  - 10-strikes-5-min-cooldown circuit breaker.
+   *   4. TieredBrowserPool  - one ProxyBoundBrowser per proxy URL, grouped
+   *      by tier. Pre-warms all browsers in parallel; `pool.ready` awaits
+   *      every browser's initial launch attempt (success or failure).
+   *
+   * `this.options.browserPool?.directPoolSize` controls how many direct
+   * browsers to spin up when no proxies are configured (local dev, CI).
    */
   private async initializeCore(): Promise<void> {
     try {
@@ -146,40 +251,55 @@ export class ReaderClient {
         logger.info("HeroCore started successfully");
       }
 
-      // Initialize browser pool
+      // Build the scraper-level primitives.
+      this.proxyGate = new PerProxyGate({
+        maxConcurrentPerProxy: 2, // default; domain profiles can tighten
+      });
+      this.healthTracker = new ProxyHealthTracker();
+
+      // Build the tiered browser pool from the configured proxy pools.
+      const tierConfigs = buildTierConfigsFromPools(this.options.proxyPools, {
+        directPoolSize: this.options.browserPool?.size ?? 1,
+      });
+
       if (this.options.verbose) {
-        logger.info("Initializing browser pool...");
+        const summary = tierConfigs.map((t) => `${t.tier}:${t.proxyUrls.length}`).join(" ");
+        logger.info(`Initializing tiered browser pool (${summary})`);
       }
 
-      const browserPoolConfig = this.options.browserPool;
-      const poolConfig = {
-        size: browserPoolConfig?.size ?? 2,
-        retireAfterPageCount: browserPoolConfig?.retireAfterPages ?? 100,
-        retireAfterAgeMs: (browserPoolConfig?.retireAfterMinutes ?? 30) * 60 * 1000,
-        maxQueueSize: browserPoolConfig?.maxQueueSize ?? 100,
-      };
+      this.tieredPool = new TieredBrowserPool({
+        tiers: tierConfigs,
+        maxTabsPerBrowser: 2,
+        retireAfterPages: this.options.browserPool?.retireAfterPages ?? 100,
+        healthTracker: this.healthTracker,
+        heroFactory: undefined as HeroFactory | undefined, // use real factory
+        showChrome: this.options.showChrome,
+        connectionToCore: this.createConnection(),
+        userAgent: this.options.userAgent,
+        logger,
+      });
 
-      this.pool = new HeroBrowserPool(
-        poolConfig,
-        undefined, // proxy set per-request
-        this.options.showChrome,
-        this.createConnection(),
-        undefined, // userAgent
-        this.options.verbose
-      );
-      await this.pool.initialize();
+      // Pre-warm: await every browser's initial launch attempt. Per-browser
+      // failures are already logged and swallowed; they don't block the
+      // pool's ready promise. The separate startup api.ipify.org check
+      // (added in a later item) will fail loud if any proxy is dead.
+      await this.tieredPool.ready;
 
       this.initialized = true;
 
       if (this.options.verbose) {
-        logger.info("Browser pool initialized successfully");
+        const stats = this.tieredPool.getStats();
+        const counts = stats.tiers.map((t) => `${t.tier}=${t.browsers.length}`).join(" ");
+        logger.info(`Browser pool initialized (${counts})`);
       }
     } catch (error: any) {
       // Clean up on failure
-      if (this.pool) {
-        await this.pool.shutdown().catch(() => {});
-        this.pool = null;
+      if (this.tieredPool) {
+        await this.tieredPool.close().catch(() => {});
+        this.tieredPool = null;
       }
+      this.proxyGate = null;
+      this.healthTracker = null;
       if (this.heroCore) {
         await this.heroCore.close().catch(() => {});
         this.heroCore = null;
@@ -249,19 +369,24 @@ export class ReaderClient {
   async scrape(options: Omit<ScrapeOptions, "connectionToCore" | "pool">): Promise<ScrapeResult> {
     await this.ensureInitialized();
 
-    if (!this.pool) {
+    if (!this.tieredPool) {
       throw new Error("Browser pool not initialized. This should not happen.");
     }
 
-    // Use proxy rotation if proxies are configured and no specific proxy is provided
-    const proxy = options.proxy ?? this.getNextProxy();
+    // Bind `resolveProxy` to `this` so the scraper can call it per-attempt
+    // without losing the client context.
+    const boundResolveProxy = (tier: ProxyTier | undefined) => this.resolveProxy(tier);
 
     return await scrape({
       ...options,
-      proxy,
+      // Caller may still pass an explicit proxy to opt out of tier routing.
+      proxy: options.proxy,
       showChrome: options.showChrome ?? this.options.showChrome,
       verbose: options.verbose ?? this.options.verbose,
-      pool: this.pool,
+      tieredPool: this.tieredPool,
+      proxyGate: this.proxyGate ?? undefined,
+      healthTracker: this.healthTracker ?? undefined,
+      resolveProxy: boundResolveProxy,
     });
   }
 
@@ -282,18 +407,74 @@ export class ReaderClient {
   async crawl(options: Omit<CrawlOptions, "connectionToCore" | "pool">): Promise<CrawlResult> {
     await this.ensureInitialized();
 
-    if (!this.pool) {
+    if (!this.tieredPool) {
       throw new Error("Browser pool not initialized. This should not happen.");
     }
 
-    // Use proxy rotation if proxies are configured and no specific proxy is provided
-    const proxy = options.proxy ?? this.getNextProxy();
+    const boundResolveProxy = (tier: ProxyTier | undefined) => this.resolveProxy(tier);
 
     return await crawl({
       ...options,
-      proxy,
-      pool: this.pool,
+      proxy: options.proxy,
+      tieredPool: this.tieredPool,
+      proxyGate: this.proxyGate ?? undefined,
+      healthTracker: this.healthTracker ?? undefined,
+      resolveProxy: boundResolveProxy,
     });
+  }
+
+  /**
+   * Create a browser session with a CDP WebSocket endpoint.
+   *
+   * Launches a Hero-stealthed Chrome and returns a WebSocket URL that
+   * Playwright or Puppeteer can connect to via `connectOverCDP()`.
+   * Full anti-bot stealth is active (TLS fingerprinting, navigator
+   * spoofing, WebRTC masking, MITM proxy).
+   *
+   * @param options - Browser session options
+   * @returns Browser session with wsEndpoint and close() method
+   *
+   * @example
+   * ```typescript
+   * import { chromium } from 'playwright';
+   *
+   * const session = await reader.browser({ proxyTier: 'residential' });
+   * const browser = await chromium.connectOverCDP(session.wsEndpoint);
+   * const page = browser.contexts()[0].pages()[0];
+   *
+   * await page.goto('https://example.com');
+   * console.log(await page.title());
+   *
+   * await session.close();
+   * ```
+   */
+  async browser(options: Omit<BrowserOptions, "connectionToCore"> = {}): Promise<BrowserSession> {
+    // No ensureInitialized() — browser sessions create their own dedicated
+    // HeroCore instance. They don't need the shared pool or HeroCore.
+    if (this.closed) {
+      throw new Error("ReaderClient has been closed. Create a new instance.");
+    }
+
+    const boundResolveProxy = (tier: ProxyTier | undefined) => this.resolveProxy(tier);
+
+    const session = await createBrowserSession({
+      ...options,
+      resolveProxy: boundResolveProxy,
+      showChrome: options.showChrome ?? this.options.showChrome,
+      verbose: options.verbose ?? this.options.verbose,
+    });
+
+    // Track active sessions so close() can clean them up
+    this.activeSessions.set(session.sessionId, session);
+
+    // Remove from tracking when the session closes
+    const originalClose = session.close;
+    session.close = async () => {
+      this.activeSessions.delete(session.sessionId);
+      await originalClose();
+    };
+
+    return session;
   }
 
   /**
@@ -318,22 +499,37 @@ export class ReaderClient {
     // Remove process event handlers to allow clean exit
     this.removeCleanupHandlers();
 
-    // Shutdown pool first (closes browser instances)
-    if (this.pool) {
+    // Close all active browser sessions first
+    if (this.activeSessions.size > 0) {
       if (this.options.verbose) {
-        logger.info("Shutting down browser pool...");
+        logger.info(`Closing ${this.activeSessions.size} active browser session(s)...`);
+      }
+      const sessionClosePromises = Array.from(this.activeSessions.values()).map((session) =>
+        session.close().catch(() => {})
+      );
+      await Promise.all(sessionClosePromises);
+      this.activeSessions.clear();
+    }
+
+    // Shutdown the tiered pool first (closes every browser in every tier)
+    if (this.tieredPool) {
+      if (this.options.verbose) {
+        logger.info("Shutting down tiered browser pool...");
       }
 
       try {
-        await this.pool.shutdown();
+        await this.tieredPool.close();
       } catch (error: any) {
         if (this.options.verbose) {
           logger.warn(`Error shutting down pool: ${error.message}`);
         }
       }
 
-      this.pool = null;
+      this.tieredPool = null;
     }
+
+    this.proxyGate = null;
+    this.healthTracker = null;
 
     // Then close HeroCore
     if (this.heroCore) {

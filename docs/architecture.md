@@ -7,27 +7,25 @@ This document describes the internal architecture of Reader, helping contributor
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Public API                                │
-│                   scrape() / crawl()                             │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-              ┌───────────────┴───────────────┐
-              │                               │
-        ┌─────▼─────┐                   ┌─────▼─────┐
-        │  Scraper  │                   │  Crawler  │
-        │  Class    │                   │  Class    │
-        └─────┬─────┘                   └─────┬─────┘
-              │                               │
-              └───────────────┬───────────────┘
-                              │
-                    ┌─────────▼─────────┐
-                    │   BrowserPool     │
-                    │   (Hero Manager)  │
-                    └─────────┬─────────┘
-                              │
-          ┌───────────────────┼───────────────────┐
-          │                   │                   │
-┌─────────▼────────┐ ┌────────▼────────┐ ┌────────▼────────┐
-│   Hero Config    │ │   Cloudflare    │ │   Formatters    │
+│              scrape() / crawl() / browser()                      │
+└──────────┬─────────────────┬────────────────┬───────────────────┘
+           │                 │                │
+     ┌─────▼─────┐    ┌─────▼─────┐    ┌─────▼──────────┐
+     │  Scraper  │    │  Crawler  │    │ BrowserSession │
+     │  Class    │    │  Class    │    │ (CDP WebSocket)│
+     └─────┬─────┘    └─────┬─────┘    └─────┬──────────┘
+           │                │                │
+           └────────┬───────┘                │ own HeroCore
+                    │                        │
+          ┌─────────▼─────────┐    ┌─────────▼─────────┐
+          │ TieredBrowserPool │    │  Dedicated Chrome  │
+          │ (shared, pooled)  │    │  (per-session)     │
+          └─────────┬─────────┘    └───────────────────┘
+                    │
+    ┌───────────────┼───────────────┐
+    │               │               │
+┌───▼──────────┐ ┌──▼──────────┐ ┌──▼────────────┐
+│  Hero Config │ │  Orchestrator│ │  Formatters   │
 │ (TLS, DNS, etc.) │ │   Detection     │ │ (MD, HTML, etc) │
 └──────────────────┘ └─────────────────┘ └─────────────────┘
 ```
@@ -55,8 +53,7 @@ src/
 ├── formatters/
 │   ├── markdown.ts       # formatToMarkdown() - uses supermarkdown
 │   ├── html.ts           # formatToHTML() - full HTML document
-│   ├── json.ts           # formatToJson() - structured JSON
-│   ├── text.ts           # formatToText() - plain text
+│   ├── postprocess.ts    # Post-processing utilities
 │   └── index.ts          # Re-exports all formatters
 │
 ├── utils/
@@ -242,8 +239,6 @@ Each formatter transforms scraped pages into a specific format:
 |-----------|-------|--------|
 | `formatToMarkdown` | Pages, metadata | Markdown document with frontmatter |
 | `formatToHTML` | Pages, metadata | Complete HTML document with CSS |
-| `formatToJson` | Pages, metadata | Structured JSON object |
-| `formatToText` | Pages, metadata | Plain text extraction |
 
 **Markdown formatter** uses [supermarkdown](https://github.com/vakra-dev/supermarkdown) - a high-performance Rust-based HTML-to-Markdown converter with full GFM support.
 
@@ -397,7 +392,7 @@ Cleaning removes:
 
 3. Add to format type in `src/types.ts`:
    ```typescript
-   formats?: Array<"markdown" | "html" | "json" | "text" | "newformat">
+   formats?: Array<"markdown" | "html" | "newformat">
    ```
 
 4. Call formatter in `src/scraper.ts`
@@ -416,13 +411,11 @@ Cleaning removes:
 
 ## Testing
 
-Currently testing is manual. Key test scenarios:
+```bash
+cd reader && npx vitest run
+```
 
-1. **Basic scraping** - example.com
-2. **Cloudflare-protected sites** - Sites with JS challenges
-3. **Batch scraping** - Multiple URLs with concurrency
-4. **Crawling** - Multi-page discovery
-5. **All output formats** - Verify each formatter
+415 unit tests across 26 test files covering scraping, crawling, browser sessions, formatters, content cleaning, proxy pools, and error handling.
 
 ## Related Guides
 

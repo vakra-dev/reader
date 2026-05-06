@@ -1,8 +1,8 @@
 /**
  * @vakra-dev/reader
  *
- * Production-grade web scraping engine with anti-bot bypass using Ulixee Hero
- * Drop-in replacement for @reader/core with superior Cloudflare bypass capabilities
+ * Production-grade web scraping engine for LLMs.
+ * Clean markdown output, ready for your agents.
  */
 
 // =============================================================================
@@ -12,6 +12,8 @@ export { ReaderClient } from "./client";
 export type { ReaderClientOptions, ProxyRotation } from "./client";
 export { scrape, Scraper } from "./scraper";
 export { crawl, Crawler } from "./crawler";
+export { createBrowserSession } from "./browser-session";
+export type { BrowserOptions, BrowserSession } from "./browser-types";
 
 // =============================================================================
 // Daemon exports
@@ -38,6 +40,8 @@ export type {
   WebsiteMetadata,
   ProxyConfig,
   ProxyMetadata,
+  ProxyPoolConfig,
+  ProxyTier,
   BrowserPoolConfig,
 } from "./types";
 
@@ -78,17 +82,6 @@ export type {
 } from "./browser/types";
 
 // =============================================================================
-// Cloudflare exports (for advanced usage)
-// =============================================================================
-export { detectChallenge, isChallengePage } from "./cloudflare/detector";
-export { waitForChallengeResolution, waitForSelector, handleChallenge } from "./cloudflare/handler";
-export type {
-  ChallengeDetection,
-  ChallengeResolutionResult,
-  ChallengeWaitOptions,
-} from "./cloudflare/types";
-
-// =============================================================================
 // Proxy exports (for advanced usage)
 // =============================================================================
 export { createProxyUrl, parseProxyUrl } from "./proxy/config";
@@ -115,5 +108,34 @@ export {
   BrowserPoolError,
   ClientClosedError,
   NotInitializedError,
+  DNSError,
+  TLSError,
+  BotDetectedError,
+  ProxyConnectionError,
+  ProxyExhaustedError,
+  ContentTooLargeError,
+  MarkdownConversionError,
+  EmptyContentError,
   wrapError,
 } from "./errors";
+
+// Engine errors
+export { ScrapeFailedError } from "./engines/errors";
+
+// =============================================================================
+// Block detection exports
+// =============================================================================
+export { detectBotPage, detectBotTitle, isBlockedResponse } from "./utils/block-detector";
+export type { BlockDetectionConfig } from "./utils/block-detector";
+
+// =============================================================================
+// URL rewriter exports
+// =============================================================================
+export { rewriteUrl } from "./utils/url-rewriter";
+export type { UrlRewriteRule, RewriteResult } from "./utils/url-rewriter";
+
+// =============================================================================
+// Domain profiles exports
+// =============================================================================
+export { getDomainProfile, applyDomainProfile } from "./config/domain-profiles";
+export type { DomainProfile } from "./config/domain-profiles";

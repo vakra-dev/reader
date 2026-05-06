@@ -1,22 +1,20 @@
 /**
- * Engine types for multi-engine scraping architecture
+ * Engine types for the scraping engine.
  *
- * Engine stack (in order of preference):
- * 1. http - Native fetch, fastest, no browser
- * 2. tlsclient - TLS fingerprinting via got-scraping
- * 3. hero - Full browser with JavaScript execution
+ * Reader uses a single engine: Hero (Ulixee), a full browser with
+ * JavaScript execution, TLS fingerprinting, and Cloudflare bypass.
  */
 
 import type { ScrapeOptions } from "../types.js";
 import type { Logger } from "../utils/logger.js";
 
 /**
- * Available engine names
+ * Engine name — Hero is the only engine.
  */
-export type EngineName = "http" | "tlsclient" | "hero";
+export type EngineName = "hero";
 
 /**
- * Result returned by an engine after scraping
+ * Result returned by the engine after scraping
  */
 export interface EngineResult {
   /** Raw HTML content */
@@ -56,12 +54,10 @@ export interface EngineMeta {
 export interface EngineConfig {
   /** Engine name */
   name: EngineName;
-  /** Timeout before starting next engine (ms) */
+  /** Default timeout (ms) */
   timeout: number;
   /** Absolute max time before killing (ms) */
   maxTimeout: number;
-  /** Quality score - higher means preferred (for sorting) */
-  quality: number;
   /** Engine capabilities */
   features: EngineFeatures;
 }
@@ -83,7 +79,7 @@ export interface EngineFeatures {
 }
 
 /**
- * Engine interface - all engines must implement this
+ * Engine interface
  */
 export interface Engine {
   /** Engine configuration */
@@ -91,65 +87,27 @@ export interface Engine {
 
   /**
    * Scrape a URL
-   * @param meta - Scrape metadata (url, options, logger, abortSignal)
-   * @returns Engine result with HTML and metadata
-   * @throws EngineError on failure
    */
   scrape(meta: EngineMeta): Promise<EngineResult>;
 
   /**
    * Check if engine is available and configured
-   * @returns true if engine can be used
    */
   isAvailable(): boolean;
 }
 
 /**
- * Default engine configurations
+ * Hero engine configuration
  */
-export const ENGINE_CONFIGS: Record<EngineName, EngineConfig> = {
-  http: {
-    name: "http",
-    timeout: 3000,
-    maxTimeout: 10000,
-    quality: 100,
-    features: {
-      javascript: false,
-      cloudflare: false,
-      tlsFingerprint: false,
-      waitFor: false,
-      screenshots: false,
-    },
-  },
-  tlsclient: {
-    name: "tlsclient",
-    timeout: 5000,
-    maxTimeout: 15000,
-    quality: 80,
-    features: {
-      javascript: false,
-      cloudflare: false,
-      tlsFingerprint: true,
-      waitFor: false,
-      screenshots: false,
-    },
-  },
-  hero: {
-    name: "hero",
-    timeout: 30000,
-    maxTimeout: 60000,
-    quality: 50,
-    features: {
-      javascript: true,
-      cloudflare: true,
-      tlsFingerprint: true,
-      waitFor: true,
-      screenshots: true,
-    },
+export const ENGINE_CONFIG: EngineConfig = {
+  name: "hero",
+  timeout: 10000,
+  maxTimeout: 30000,
+  features: {
+    javascript: true,
+    cloudflare: true,
+    tlsFingerprint: true,
+    waitFor: true,
+    screenshots: true,
   },
 };
-
-/**
- * Default engine order (by quality, highest first)
- */
-export const DEFAULT_ENGINE_ORDER: EngineName[] = ["http", "tlsclient", "hero"];

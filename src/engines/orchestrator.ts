@@ -1,32 +1,13 @@
 /**
  * Engine Orchestrator
  *
- * Manages multi-engine scraping with waterfall fallback pattern.
- * Tries engines in order of speed/efficiency:
- *   1. http - Native fetch, fastest, works for static sites
- *   2. tlsclient - TLS fingerprinting for better compatibility
- *   3. hero - Full browser, handles Cloudflare and JS-heavy sites
- *
- * Features:
- * - Staggered timeouts (each engine gets its configured time before fallback)
- * - Parallel racing option (start next engine while previous still running)
- * - Graceful fallback on challenge detection
- * - Detailed error tracking per engine
+ * Runs Hero against a URL, applies a minimal quality check, and returns
+ * the result. Detects proxy-level blocks (HTTP 401/403/429, redirect
+ * loops) so the scraper's retry loop can escalate to a stronger proxy.
  */
 
-import type { Engine, EngineName, EngineMeta, EngineResult } from "./types.js";
-import { DEFAULT_ENGINE_ORDER } from "./types.js";
-import {
-  EngineError,
-  ChallengeDetectedError,
-  InsufficientContentError,
-  HttpError,
-  EngineTimeoutError,
-  EngineUnavailableError,
-  AllEnginesFailedError,
-} from "./errors.js";
-import { httpEngine } from "./http/index.js";
-import { tlsClientEngine } from "./tlsclient/index.js";
+import type { EngineMeta, EngineResult } from "./types.js";
+import { ScrapeFailedError, HttpError, EngineUnavailableError } from "./errors.js";
 import { heroEngine } from "./hero/index.js";
 import type { Logger } from "../utils/logger.js";
 
@@ -34,14 +15,6 @@ import type { Logger } from "../utils/logger.js";
  * Orchestrator options
  */
 export interface OrchestratorOptions {
-  /** Engines to use (in order). Default: ['http', 'tlsclient', 'hero'] */
-  engines?: EngineName[];
-  /** Skip specific engines */
-  skipEngines?: EngineName[];
-  /** Force a specific engine (skips others) */
-  forceEngine?: EngineName;
-  /** Enable parallel racing (start next engine while previous still running) */
-  parallelRacing?: boolean;
   /** Logger instance */
   logger?: Logger;
   /** Verbose logging */
@@ -49,28 +22,15 @@ export interface OrchestratorOptions {
 }
 
 /**
- * Engine registry
- */
-const ENGINE_REGISTRY: Record<EngineName, Engine> = {
-  http: httpEngine,
-  tlsclient: tlsClientEngine,
-  hero: heroEngine,
-};
-
-/**
- * Orchestrator result with engine metadata
+ * Orchestrator result with scrape metadata
  */
 export interface OrchestratorResult extends EngineResult {
-  /** Engines that were attempted */
-  attemptedEngines: EngineName[];
-  /** Errors from failed engines */
-  engineErrors: Map<EngineName, Error>;
+  /** Whether the response was detected as a block page */
+  blocked: boolean;
 }
 
 /**
  * Engine Orchestrator
- *
- * Coordinates multiple scraping engines with fallback logic.
  *
  * @example
  * const orchestrator = new EngineOrchestrator({ verbose: true });
@@ -78,179 +38,90 @@ export interface OrchestratorResult extends EngineResult {
  *   url: 'https://example.com',
  *   options: { timeoutMs: 30000 }
  * });
- * console.log(`Scraped with ${result.engine} engine`);
  */
 export class EngineOrchestrator {
   private options: OrchestratorOptions;
-  private engines: Engine[];
-  private engineOrder: EngineName[];
 
   constructor(options: OrchestratorOptions = {}) {
     this.options = options;
-    this.engineOrder = this.resolveEngineOrder();
-    this.engines = this.engineOrder
-      .map((name) => ENGINE_REGISTRY[name])
-      .filter((engine) => engine.isAvailable());
   }
 
   /**
-   * Resolve the engine order based on options
+   * Assess result quality. Intentionally minimal — if there's any text
+   * content, it's a pass. Block detection is a proxy concern, not ours.
    */
-  private resolveEngineOrder(): EngineName[] {
-    // If force engine is set, use only that
-    if (this.options.forceEngine) {
-      return [this.options.forceEngine];
-    }
+  private assessQuality(result: EngineResult): {
+    passed: boolean;
+    reason?: "empty_content" | "http_error";
+  } {
+    const statusOk =
+      (result.statusCode >= 200 && result.statusCode < 300) || result.statusCode === 304;
 
-    // Start with configured order or default
-    let order = this.options.engines || [...DEFAULT_ENGINE_ORDER];
+    const textContent =
+      result.html
+        ?.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<[^>]*>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim() ?? "";
 
-    // Remove skipped engines
-    if (this.options.skipEngines) {
-      order = order.filter((e) => !this.options.skipEngines!.includes(e));
-    }
+    const hasContent = textContent.length > 0;
 
-    return order;
+    if (!statusOk && !hasContent) return { passed: false, reason: "http_error" };
+    if (statusOk && !hasContent) return { passed: false, reason: "empty_content" };
+
+    return { passed: true };
   }
 
   /**
-   * Get available engines
-   */
-  getAvailableEngines(): EngineName[] {
-    return this.engines.map((e) => e.config.name);
-  }
-
-  /**
-   * Scrape a URL using the engine cascade
+   * Scrape a URL using Hero.
    *
-   * @param meta - Engine metadata (url, options, logger, abortSignal)
-   * @returns Scrape result with engine metadata
-   * @throws AllEnginesFailedError if all engines fail
+   * @throws ScrapeFailedError on failure (with proxyBlock flag for escalation)
    */
   async scrape(meta: EngineMeta): Promise<OrchestratorResult> {
-    const attemptedEngines: EngineName[] = [];
-    const engineErrors = new Map<EngineName, Error>();
     const logger = meta.logger || this.options.logger;
     const verbose = this.options.verbose || meta.options.verbose;
 
-    if (this.engines.length === 0) {
-      throw new AllEnginesFailedError([], engineErrors);
-    }
-
     const log = (msg: string) => {
-      if (verbose) {
-        logger?.info(msg);
-      } else {
-        logger?.debug(msg);
-      }
+      if (verbose) logger?.info(msg);
+      else logger?.debug(msg);
     };
 
-    log(`[orchestrator] Starting scrape of ${meta.url} with engines: ${this.engineOrder.join(" → ")}`);
+    if (!heroEngine.isAvailable()) {
+      throw new ScrapeFailedError(new EngineUnavailableError("hero", "Hero engine not available"));
+    }
 
-    // Try each engine in order
-    for (const engine of this.engines) {
-      const engineName = engine.config.name;
-      attemptedEngines.push(engineName);
+    log(`[orchestrator] Scraping ${meta.url} with Hero`);
 
-      try {
-        log(`[orchestrator] Trying ${engineName} engine...`);
+    try {
+      const result = await heroEngine.scrape(meta);
 
-        // Create abort controller for this engine's timeout
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), engine.config.maxTimeout);
-
-        // Link external abort signal
-        if (meta.abortSignal) {
-          meta.abortSignal.addEventListener("abort", () => controller.abort(), { once: true });
-        }
-
-        try {
-          const result = await engine.scrape({
-            ...meta,
-            abortSignal: controller.signal,
-          });
-
-          clearTimeout(timeoutId);
-
-          log(`[orchestrator] ✓ ${engineName} succeeded in ${result.duration}ms`);
-
-          return {
-            ...result,
-            attemptedEngines,
-            engineErrors,
-          };
-        } finally {
-          clearTimeout(timeoutId);
-        }
-      } catch (error: unknown) {
-        const err = error instanceof Error ? error : new Error(String(error));
-        engineErrors.set(engineName, err);
-
-        // Log the error with appropriate detail
-        if (error instanceof ChallengeDetectedError) {
-          log(`[orchestrator] ${engineName} detected challenge: ${error.challengeType}`);
-        } else if (error instanceof InsufficientContentError) {
-          log(`[orchestrator] ${engineName} insufficient content: ${error.contentLength} chars`);
-        } else if (error instanceof HttpError) {
-          log(`[orchestrator] ${engineName} HTTP error: ${error.statusCode}`);
-        } else if (error instanceof EngineTimeoutError) {
-          log(`[orchestrator] ${engineName} timed out after ${error.timeoutMs}ms`);
-        } else if (error instanceof EngineUnavailableError) {
-          log(`[orchestrator] ${engineName} unavailable: ${err.message}`);
-        } else {
-          log(`[orchestrator] ${engineName} failed: ${err.message}`);
-        }
-
-        // Check if we should continue to next engine
-        if (!this.shouldRetry(error)) {
-          log(`[orchestrator] Non-retryable error, stopping cascade`);
-          break;
-        }
-
-        // Continue to next engine
-        log(`[orchestrator] Falling back to next engine...`);
+      const quality = this.assessQuality(result);
+      if (!quality.passed) {
+        log(`[orchestrator] Quality check failed: ${quality.reason}`);
+        throw new ScrapeFailedError(new Error(`Quality check failed: ${quality.reason}`));
       }
+
+      log(`[orchestrator] ✓ Hero succeeded in ${result.duration}ms`);
+      return { ...result, blocked: false };
+    } catch (error: unknown) {
+      // Already wrapped — re-throw
+      if (error instanceof ScrapeFailedError) throw error;
+
+      const err = error instanceof Error ? error : new Error(String(error));
+
+      // Detect proxy-level blocks for escalation
+      let proxyBlock = false;
+      if (err instanceof HttpError && [401, 403, 429].includes(err.statusCode)) {
+        proxyBlock = true;
+      }
+      if (err.message.includes("redirect") || err.message.includes("ERR_TOO_MANY")) {
+        proxyBlock = true;
+      }
+
+      log(`[orchestrator] Hero failed: ${err.message}${proxyBlock ? " (proxy block)" : ""}`);
+      throw new ScrapeFailedError(err, { proxyBlock });
     }
-
-    // All engines failed
-    log(`[orchestrator] All engines failed for ${meta.url}`);
-    throw new AllEnginesFailedError(attemptedEngines, engineErrors);
-  }
-
-  /**
-   * Determine if we should retry with next engine
-   */
-  private shouldRetry(error: unknown): boolean {
-    // Always retry on these errors
-    if (
-      error instanceof ChallengeDetectedError ||
-      error instanceof InsufficientContentError ||
-      error instanceof EngineTimeoutError
-    ) {
-      return true;
-    }
-
-    // Retry on HTTP errors that might be bot detection or server issues
-    // 403 Forbidden - often bot detection, try better fingerprinting
-    // 404 Not Found - might be JS-rendered SPA that needs browser
-    // 429 Too Many Requests - rate limited, try different engine
-    // 5xx Server errors - might be blocking, try again
-    if (error instanceof HttpError) {
-      return error.statusCode === 403 || error.statusCode === 404 || error.statusCode === 429 || error.statusCode >= 500;
-    }
-
-    // Don't retry on unavailable (won't help)
-    if (error instanceof EngineUnavailableError) {
-      return true; // Skip to next engine
-    }
-
-    // Generic engine errors - check retryable flag
-    if (error instanceof EngineError) {
-      return error.retryable;
-    }
-
-    // Unknown errors - retry
-    return true;
   }
 }
 
@@ -259,21 +130,4 @@ export class EngineOrchestrator {
  */
 export function createOrchestrator(options: OrchestratorOptions = {}): EngineOrchestrator {
   return new EngineOrchestrator(options);
-}
-
-/**
- * Convenience function to scrape with orchestrator
- *
- * @example
- * const result = await orchestratedScrape({
- *   url: 'https://example.com',
- *   options: { pool }
- * });
- */
-export async function orchestratedScrape(
-  meta: EngineMeta,
-  options: OrchestratorOptions = {}
-): Promise<OrchestratorResult> {
-  const orchestrator = new EngineOrchestrator(options);
-  return orchestrator.scrape(meta);
 }

@@ -197,6 +197,57 @@ interface ProxyMetadata {
 }
 ```
 
+## Tiered Proxy Pools (Recommended)
+
+Instead of a flat proxy list, configure separate datacenter and residential pools. Reader auto-escalates from datacenter to residential when a site blocks:
+
+```typescript
+const reader = new ReaderClient({
+  proxyPools: {
+    datacenter: [
+      { url: "http://user:pass@dc-proxy1:8080" },
+      { url: "http://user:pass@dc-proxy2:8080" },
+    ],
+    residential: [
+      { url: "http://user:pass@res-proxy1:8080" },
+    ],
+  },
+});
+
+const result = await reader.scrape({
+  urls: ["https://example.com"],
+  proxyTier: "auto", // datacenter first, escalate to residential on block
+});
+```
+
+### Proxy Tiers
+
+| Tier | When used | Credits |
+|------|-----------|---------|
+| `"datacenter"` | Fast, most sites | 1 per scrape |
+| `"residential"` | Anti-bot sites (Amazon, LinkedIn) | 3 per scrape |
+| `"auto"` | Starts datacenter, escalates on block | 1 or 3 |
+
+### Environment Variables
+
+Configure proxy pools via environment variables (useful for daemons):
+
+```bash
+PROXY_DATACENTER=http://user:pass@dc1:8080,http://user:pass@dc2:8080
+PROXY_RESIDENTIAL=http://user:pass@res1:8080
+```
+
+### Health Tracking
+
+Reader monitors proxy health automatically:
+- **Circuit breaker:** After 10 consecutive failures, a proxy is benched for 5 minutes
+- **Auto-recovery:** Benched proxies are automatically revived after the cooldown
+- **Only proxy faults count:** Bot blocks (403, captcha) don't count against the proxy. Those are the site's behavior, not the proxy's
+
+### Per-Proxy Concurrency
+
+Each proxy URL has a concurrency limit (default: 2 simultaneous requests). This prevents overwhelming a single proxy IP, which can trigger rate limits.
+
 ## Rotation Strategies
 
 ### Per-Request Rotation
@@ -345,12 +396,12 @@ async function testProxy(proxy: ProxyConfig): Promise<boolean> {
   try {
     const result = await reader.scrape({
       urls: ["https://httpbin.org/ip"],
-      formats: ["text"],
+      formats: ["markdown"],
       proxy,
       timeoutMs: 10000,
     });
 
-    console.log("Proxy IP:", result.data[0].text);
+    console.log("Proxy IP:", result.data[0].markdown);
     return true;
   } catch (error) {
     console.log("Proxy failed:", error.message);
@@ -368,12 +419,11 @@ const reader = new ReaderClient();
 
 const result = await reader.scrape({
   urls: ["https://ipinfo.io/json"],
-  formats: ["json"],
+  formats: ["markdown"],
   proxy: { ...proxyConfig, country: "uk" },
 });
 
-const info = JSON.parse(result.data[0].json);
-console.log("Country:", info.country);  // Should be "GB"
+console.log(result.data[0].markdown);  // Contains the IP info
 
 await reader.close();
 ```

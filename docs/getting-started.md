@@ -77,7 +77,7 @@ const reader = new ReaderClient();
 
 const result = await reader.scrape({
   urls: ["https://news.ycombinator.com"],
-  formats: ["markdown", "text"],
+  formats: ["markdown"],
 });
 
 // Access the markdown content
@@ -142,6 +142,41 @@ if (result.scraped) {
 await reader.close();
 ```
 
+### Browser Session
+
+Launch a stealthed Chrome and drive it with Playwright or Puppeteer:
+
+```typescript
+import { ReaderClient } from "@vakra-dev/reader";
+import { chromium } from "playwright-core";
+
+const reader = new ReaderClient();
+
+const session = await reader.browser();
+const browser = await chromium.connectOverCDP(session.wsEndpoint);
+const context = await browser.newContext();
+const page = await context.newPage();
+
+await page.goto("https://news.ycombinator.com");
+console.log("Title:", await page.title());
+
+// Full Playwright API - click, type, screenshot, evaluate
+const stories = await page.evaluate(() =>
+  Array.from(document.querySelectorAll(".athing")).slice(0, 5).map((r) =>
+    r.querySelector(".titleline > a")?.textContent
+  )
+);
+console.log("Top stories:", stories);
+
+await browser.close();
+await session.close();
+await reader.close();
+```
+
+Install Playwright: `npm install playwright-core`
+
+For more examples, see the [Browser Sessions guide](guides/browser-sessions.md).
+
 ## Understanding the Output
 
 ### ScrapeResult Structure
@@ -166,12 +201,11 @@ interface WebsiteScrapeResult {
   // Content in requested formats
   markdown?: string;
   html?: string;
-  json?: string;
-  text?: string;
 
   // Metadata about this specific scrape
   metadata: {
     baseUrl: string;
+    finalUrl?: string;  // Present if URL redirected
     totalPages: number;
     scrapedAt: string;
     duration: number;
@@ -235,7 +269,7 @@ npx reader scrape https://example.com --standalone
 npx reader scrape https://example.com
 
 # Scrape with multiple formats
-npx reader scrape https://example.com -f markdown,text,json
+npx reader scrape https://example.com -f markdown,html
 
 # Scrape multiple URLs concurrently
 npx reader scrape url1 url2 url3 -c 3
@@ -312,7 +346,6 @@ Based on your use case, explore these guides:
 | Production server deployment | [Production Server](deployment/production-server.md) |
 | High-volume scraping | [Browser Pool](guides/browser-pool.md) |
 | Docker deployment | [Docker](deployment/docker.md) |
-| Serverless deployment | [Serverless](deployment/serverless.md) |
 
 ## Need Help?
 

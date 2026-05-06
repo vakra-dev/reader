@@ -4,7 +4,7 @@ import type { ProxyConfig } from "../types";
  * Create proxy URL from configuration
  *
  * Supports both datacenter and residential proxies.
- * For residential proxies (e.g., IPRoyal), generates a sticky session ID.
+ * For residential proxies, generates a sticky session ID.
  *
  * @param config - Proxy configuration
  * @returns Formatted proxy URL
@@ -19,18 +19,6 @@ import type { ProxyConfig } from "../types";
  *   port: 8080
  * })
  * // Returns: "http://user:pass@proxy.example.com:8080"
- *
- * @example
- * // Residential proxy with sticky session
- * createProxyUrl({
- *   type: 'residential',
- *   username: 'customer-abc',
- *   password: 'secret',
- *   host: 'geo.iproyal.com',
- *   port: 12321,
- *   country: 'us'
- * })
- * // Returns: "http://customer-abc_session-hero_123_abc456_country-us:secret@geo.iproyal.com:12321"
  */
 export function createProxyUrl(config: ProxyConfig): string {
   // If full URL provided, use it directly

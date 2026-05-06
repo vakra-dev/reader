@@ -16,7 +16,8 @@
 import http from "http";
 import type { ScrapeOptions, ScrapeResult } from "../types";
 import type { CrawlOptions, CrawlResult } from "../crawl-types";
-import type { DaemonStatus } from "./server";
+import type { BrowserOptions } from "../browser-types";
+import type { DaemonStatus, BrowserSessionInfo } from "./server";
 import { DEFAULT_DAEMON_PORT } from "./server";
 
 /**
@@ -27,6 +28,8 @@ export interface DaemonClientOptions {
   port?: number;
   /** Request timeout in milliseconds (default: 600000 = 10 minutes) */
   timeoutMs?: number;
+  /** Bearer token for daemon auth (default: READER_AUTH_TOKEN env var) */
+  authToken?: string;
 }
 
 /**
@@ -39,6 +42,7 @@ export class DaemonClient {
     this.options = {
       port: options.port ?? DEFAULT_DAEMON_PORT,
       timeoutMs: options.timeoutMs ?? 600000, // 10 minutes default
+      authToken: options.authToken ?? process.env.READER_AUTH_TOKEN ?? "",
     };
   }
 
@@ -81,6 +85,37 @@ export class DaemonClient {
   }
 
   /**
+   * Create a browser session via daemon
+   */
+  async browserCreate(
+    options: Omit<BrowserOptions, "connectionToCore"> = {}
+  ): Promise<BrowserSessionInfo> {
+    return this.request<BrowserSessionInfo>({
+      action: "browser.create",
+      options,
+    });
+  }
+
+  /**
+   * Stop a browser session via daemon
+   */
+  async browserStop(sessionId: string): Promise<void> {
+    await this.request<{ sessionId: string }>({
+      action: "browser.stop",
+      sessionId,
+    });
+  }
+
+  /**
+   * List active browser sessions via daemon
+   */
+  async browserList(): Promise<BrowserSessionInfo[]> {
+    return this.request<BrowserSessionInfo[]>({
+      action: "browser.list",
+    });
+  }
+
+  /**
    * Check if daemon is reachable
    */
   async isRunning(): Promise<boolean> {
@@ -108,6 +143,9 @@ export class DaemonClient {
           headers: {
             "Content-Type": "application/json",
             "Content-Length": Buffer.byteLength(data),
+            ...(this.options.authToken
+              ? { Authorization: `Bearer ${this.options.authToken}` }
+              : {}),
           },
           timeout: this.options.timeoutMs,
         },
@@ -136,7 +174,9 @@ export class DaemonClient {
 
       req.on("error", (error: NodeJS.ErrnoException) => {
         if (error.code === "ECONNREFUSED") {
-          reject(new Error(`Cannot connect to daemon on port ${this.options.port}. Is it running?`));
+          reject(
+            new Error(`Cannot connect to daemon on port ${this.options.port}. Is it running?`)
+          );
         } else {
           reject(error);
         }

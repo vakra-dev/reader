@@ -14,7 +14,7 @@ const reader = new ReaderClient({ verbose: true });
 // Scrape URLs
 const result = await reader.scrape({
   urls: ["https://example.com"],
-  formats: ["markdown", "text"],
+  formats: ["markdown"],
 });
 
 // Crawl a website
@@ -22,6 +22,10 @@ const crawlResult = await reader.crawl({
   url: "https://example.com",
   depth: 2,
 });
+
+// Launch a stealthed browser session
+const session = await reader.browser();
+// → session.wsEndpoint for Playwright/Puppeteer
 
 // Close when done (optional - auto-closes on exit)
 await reader.close();
@@ -38,8 +42,18 @@ new ReaderClient(options?: ReaderClientOptions)
 | `verbose` | `boolean` | `false` | Enable verbose logging |
 | `showChrome` | `boolean` | `false` | Show browser window for debugging |
 | `browserPool` | `BrowserPoolConfig` | - | Browser pool configuration |
-| `proxies` | `ProxyConfig[]` | - | List of proxies to rotate through |
+| `proxyPools` | `ProxyPoolConfig` | - | Tiered proxy pools (datacenter + residential) |
+| `proxies` | `ProxyConfig[]` | - | List of proxies to rotate through (legacy) |
 | `proxyRotation` | `"round-robin" \| "random"` | `"round-robin"` | Proxy rotation strategy |
+
+#### ProxyPoolConfig
+
+```typescript
+interface ProxyPoolConfig {
+  datacenter?: ProxyConfig[];   // Fast, cheap - works for most sites
+  residential?: ProxyConfig[];  // Slower, anti-bot sites (Amazon, LinkedIn)
+}
+```
 
 #### BrowserPoolConfig
 
@@ -80,6 +94,35 @@ const result = await reader.crawl(options): Promise<CrawlResult>
 
 See [CrawlOptions](#crawloptions) for available options.
 
+#### browser(options?)
+
+Launch a stealthed browser session and return a CDP WebSocket URL for Playwright/Puppeteer.
+
+```typescript
+const session = await reader.browser(options?): Promise<BrowserSession>
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `proxy` | `ProxyConfig` | - | Proxy configuration |
+| `proxyTier` | `ProxyTier` | - | Proxy tier: `"datacenter"`, `"residential"`, `"auto"` |
+| `showChrome` | `boolean` | `false` | Show browser window |
+| `timeoutMs` | `number` | `300000` | Session lifetime (auto-closes after) |
+| `verbose` | `boolean` | `false` | Enable verbose logging |
+
+Returns:
+
+```typescript
+interface BrowserSession {
+  sessionId: string;       // Unique session identifier
+  wsEndpoint: string;      // CDP WebSocket URL
+  createdAt: string;       // ISO timestamp
+  close(): Promise<void>;  // Close session and release resources
+}
+```
+
+See the [Browser Sessions guide](guides/browser-sessions.md) for full examples.
+
 #### isReady()
 
 Check if the client is initialized and ready.
@@ -111,7 +154,7 @@ import { scrape } from "@vakra-dev/reader";
 
 const result = await scrape({
   urls: ["https://example.com"],
-  formats: ["markdown", "text"],
+  formats: ["markdown"],
 });
 ```
 
@@ -121,16 +164,16 @@ const result = await scrape({
 |------|------|----------|---------|-------------|
 | `urls` | `string[]` | Yes | - | Array of URLs to scrape |
 | `formats` | `FormatType[]` | No | `["markdown"]` | Output formats |
-| `includeMetadata` | `boolean` | No | `true` | Include metadata in formatted output |
+| `onlyMainContent` | `boolean` | No | `true` | Extract only main content |
+| `includeTags` | `string[]` | No | `[]` | CSS selectors for elements to keep |
+| `excludeTags` | `string[]` | No | `[]` | CSS selectors for elements to remove |
 | `userAgent` | `string` | No | - | Custom user agent string |
 | `timeoutMs` | `number` | No | `30000` | Request timeout in milliseconds |
-| `includePatterns` | `string[]` | No | `[]` | URL patterns to include (regex) |
-| `excludePatterns` | `string[]` | No | `[]` | URL patterns to exclude (regex) |
 | `batchConcurrency` | `number` | No | `1` | URLs to process in parallel |
 | `batchTimeoutMs` | `number` | No | `300000` | Total batch timeout |
-| `maxRetries` | `number` | No | `2` | Retry attempts for failed URLs |
 | `onProgress` | `ProgressCallback` | No | - | Progress callback function |
 | `proxy` | `ProxyConfig` | No | - | Proxy configuration |
+| `proxyTier` | `ProxyTier` | No | - | Proxy tier: `"datacenter"`, `"residential"`, `"auto"` |
 | `waitForSelector` | `string` | No | - | CSS selector to wait for |
 | `verbose` | `boolean` | No | `false` | Enable verbose logging |
 | `showChrome` | `boolean` | No | `false` | Show browser window |
@@ -154,7 +197,7 @@ interface ScrapeResult {
 const reader = new ReaderClient();
 const result = await reader.scrape({
   urls: ["https://example.com", "https://example.org"],
-  formats: ["markdown", "json"],
+  formats: ["markdown", "html"],
   batchConcurrency: 2,
   onProgress: ({ completed, total, currentUrl }) => {
     console.log(`[${completed}/${total}] ${currentUrl}`);
@@ -255,17 +298,17 @@ await reader.close();
 ```typescript
 interface ScrapeOptions {
   urls: string[];
-  formats?: Array<"markdown" | "html" | "json" | "text">;
-  includeMetadata?: boolean;
+  formats?: Array<"markdown" | "html">;
+  onlyMainContent?: boolean;
+  includeTags?: string[];
+  excludeTags?: string[];
   userAgent?: string;
   timeoutMs?: number;
-  includePatterns?: string[];
-  excludePatterns?: string[];
   batchConcurrency?: number;
   batchTimeoutMs?: number;
-  maxRetries?: number;
   onProgress?: (progress: ProgressInfo) => void;
   proxy?: ProxyConfig;
+  proxyTier?: "datacenter" | "residential" | "auto";
   waitForSelector?: string;
   verbose?: boolean;
   showChrome?: boolean;
@@ -285,7 +328,7 @@ interface CrawlOptions {
   timeoutMs?: number;
   includePatterns?: string[];
   excludePatterns?: string[];
-  formats?: Array<"markdown" | "html" | "json" | "text">;
+  formats?: Array<"markdown" | "html">;
   scrapeConcurrency?: number;
   proxy?: ProxyConfig;
   userAgent?: string;
@@ -324,10 +367,9 @@ interface ScrapeResult {
 interface WebsiteScrapeResult {
   markdown?: string;
   html?: string;
-  json?: string;
-  text?: string;
   metadata: {
     baseUrl: string;
+    finalUrl?: string;  // Present if URL redirected
     totalPages: number;
     scrapedAt: string;
     duration: number;
@@ -532,78 +574,6 @@ await pool.shutdown(): Promise<void>
 
 ---
 
-## Cloudflare Functions
-
-### detectChallenge(hero)
-
-Detect if a Cloudflare challenge is present on the current page.
-
-```typescript
-import { detectChallenge } from "@vakra-dev/reader";
-
-const detection = await detectChallenge(hero);
-
-if (detection.isChallenge) {
-  console.log("Challenge type:", detection.type);
-  console.log("Signals:", detection.signals);
-}
-```
-
-#### Returns
-
-```typescript
-interface ChallengeDetection {
-  isChallenge: boolean;
-  type: "js_challenge" | "turnstile" | "captcha" | "blocked" | null;
-  signals: Array<{
-    type: "dom" | "text" | "url";
-    value: string;
-  }>;
-}
-```
-
----
-
-### waitForChallengeResolution(hero, options)
-
-Wait for a Cloudflare challenge to be resolved.
-
-```typescript
-import { waitForChallengeResolution } from "@vakra-dev/reader";
-
-const result = await waitForChallengeResolution(hero, {
-  maxWaitMs: 45000,
-  pollIntervalMs: 500,
-  verbose: true,
-  initialUrl: await hero.url,
-});
-
-if (result.resolved) {
-  console.log(`Resolved via ${result.method} in ${result.waitedMs}ms`);
-}
-```
-
-#### Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `maxWaitMs` | `number` | `45000` | Maximum wait time |
-| `pollIntervalMs` | `number` | `500` | Polling interval |
-| `verbose` | `boolean` | `false` | Enable logging |
-| `initialUrl` | `string` | - | Starting URL for redirect detection |
-
-#### Returns
-
-```typescript
-interface ChallengeResolutionResult {
-  resolved: boolean;
-  method?: "redirect" | "element_removal";
-  waitedMs: number;
-}
-```
-
----
-
 ## Formatter Functions
 
 ### formatToMarkdown(pages, baseUrl, scrapedAt, duration, metadata?)
@@ -640,41 +610,6 @@ const html = formatToHTML(
 );
 ```
 
----
-
-### formatToJson(pages, baseUrl, scrapedAt, duration, metadata?)
-
-Convert scraped pages to structured JSON.
-
-```typescript
-import { formatToJson } from "@vakra-dev/reader";
-
-const json = formatToJson(
-  pages,
-  "https://example.com",
-  new Date().toISOString(),
-  1500,
-  metadata
-);
-```
-
----
-
-### formatToText(pages, baseUrl, scrapedAt, duration, metadata?)
-
-Convert scraped pages to plain text.
-
-```typescript
-import { formatToText } from "@vakra-dev/reader";
-
-const text = formatToText(
-  pages,
-  "https://example.com",
-  new Date().toISOString(),
-  1500,
-  metadata
-);
-```
 
 ---
 
@@ -711,13 +646,10 @@ console.log(metadata.openGraph?.image);
 ```typescript
 const DEFAULT_OPTIONS = {
   formats: ["markdown"],
-  includeMetadata: true,
+  onlyMainContent: true,
   timeoutMs: 30000,
-  includePatterns: [],
-  excludePatterns: [],
   batchConcurrency: 1,
   batchTimeoutMs: 300000,
-  maxRetries: 2,
   verbose: false,
   showChrome: false,
 };

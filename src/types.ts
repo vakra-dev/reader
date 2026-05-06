@@ -1,5 +1,4 @@
 import type { IBrowserPool } from "./browser/types";
-import type { EngineName } from "./engines/types.js";
 
 /**
  * Proxy configuration for Hero
@@ -19,6 +18,27 @@ export interface ProxyConfig {
   port?: number;
   /** Country code for residential proxies (e.g., 'us', 'uk') */
   country?: string;
+  /** IANA timezone ID matching the proxy's exit location (e.g., 'America/Los_Angeles') */
+  timezoneId?: string;
+}
+
+/**
+ * Proxy tier — controls which proxy pool is used
+ *
+ * - "datacenter": Fast, cheap datacenter IPs — works for most sites
+ * - "residential": Residential/mobile IPs — needed for anti-bot sites (Amazon, LinkedIn)
+ * - "auto": Start with datacenter, auto-escalate to residential on block detection
+ */
+export type ProxyTier = "datacenter" | "residential" | "auto";
+
+/**
+ * Multi-tier proxy pool configuration
+ */
+export interface ProxyPoolConfig {
+  /** Datacenter proxies (fast, cheap, most sites) */
+  datacenter?: ProxyConfig[];
+  /** Residential proxies (slower, expensive, anti-bot sites) */
+  residential?: ProxyConfig[];
 }
 
 /**
@@ -29,6 +49,8 @@ export interface ProxyMetadata {
   host: string;
   /** Proxy port that was used */
   port: number;
+  /** Which proxy tier was actually used */
+  tier?: ProxyTier;
   /** Country code if geo-targeting was used */
   country?: string;
 }
@@ -57,20 +79,11 @@ export interface ScrapeOptions {
   /** Output formats - which content fields to include (default: ['markdown']) */
   formats?: Array<"markdown" | "html">;
 
-  /** Custom user agent string */
+  /** Custom user agent string (overrides Hero's default emulated UA) */
   userAgent?: string;
-
-  /** Custom headers for requests */
-  headers?: Record<string, string>;
 
   /** Request timeout in milliseconds (default: 30000) */
   timeoutMs?: number;
-
-  /** URL patterns to include (regex strings) */
-  includePatterns?: string[];
-
-  /** URL patterns to exclude (regex strings) */
-  excludePatterns?: string[];
 
   // ============================================================================
   // Content cleaning options
@@ -91,8 +104,68 @@ export interface ScrapeOptions {
   /** CSS selectors for elements to exclude (removed from output) */
   excludeTags?: string[];
 
-  /** Skip TLS/SSL certificate verification (default: true) */
-  skipTLSVerification?: boolean;
+  /**
+   * Additional CSS selectors to remove when onlyMainContent is true.
+   * Merged with the built-in nav/footer/sidebar selectors.
+   */
+  navigationSelectors?: string[];
+
+  // ============================================================================
+  // Retry & escalation options
+  // ============================================================================
+
+  /**
+   * Hard deadline for a single URL in milliseconds (default: 30000).
+   * After this, the scraper gives up regardless of proxy tier.
+   */
+  hardDeadlineMs?: number;
+
+  /**
+   * Timeout for the first attempt on datacenter proxy in milliseconds (default: 10000).
+   * If no result in this time, the scraper escalates to residential.
+   */
+  datacenterTimeoutMs?: number;
+
+  // ============================================================================
+  // Pluggable config (injected by platform, not set by end users)
+  // ============================================================================
+
+  /**
+   * Domain-specific overrides. Keyed by domain (e.g. "amazon.com").
+   * Matched against the URL's hostname (www. stripped, subdomain matching).
+   * Reader ships with NO built-in profiles — the caller provides them.
+   */
+  domainProfiles?: Record<string, import("./config/domain-profiles.js").DomainProfile>;
+
+  /**
+   * Block detection config. When provided, the scraper checks successful
+   * responses for bot-block signals and escalates to residential on match.
+   * Reader ships with NO built-in patterns — the caller provides them.
+   */
+  blockDetection?: {
+    /** Regex patterns matched against page text content */
+    patterns?: RegExp[];
+    /** Regex patterns matched against page title */
+    titlePatterns?: RegExp[];
+    /** Pages shorter than this (chars) with any signal = blocked (default: 500) */
+    shortContentThreshold?: number;
+    /** Longer pages need this many signals to be blocked (default: 3) */
+    longContentSignalThreshold?: number;
+  };
+
+  /**
+   * URL rewrite rules applied before scraping. Each rule has a `match`
+   * function and a `rewrite` function. Reader ships with NO built-in
+   * rules — the caller provides them (e.g. Google Docs → export URL).
+   */
+  urlRewriters?: Array<{
+    /** Name for diagnostics */
+    name: string;
+    /** Return true if this rewriter applies to the URL */
+    match: (url: URL) => boolean;
+    /** Return the rewritten URL string */
+    rewrite: (url: URL) => string;
+  }>;
 
   // ============================================================================
   // Batch processing options
@@ -104,9 +177,6 @@ export interface ScrapeOptions {
   /** Total timeout for the entire batch operation in milliseconds (default: 300000) */
   batchTimeoutMs?: number;
 
-  /** Maximum retry attempts for failed URLs (default: 2) */
-  maxRetries?: number;
-
   /** Progress callback for batch operations */
   onProgress?: (progress: { completed: number; total: number; currentUrl: string }) => void;
 
@@ -114,8 +184,19 @@ export interface ScrapeOptions {
   // Hero-specific options
   // ============================================================================
 
-  /** Proxy configuration for Hero */
+  /** Proxy configuration for Hero (single proxy — use proxyTier for pool-based) */
   proxy?: ProxyConfig;
+
+  /**
+   * Proxy tier selection (default: "auto")
+   * - "datacenter": Use datacenter proxy pool
+   * - "residential": Use residential proxy pool
+   * - "auto": Start with datacenter, escalate to residential on block detection
+   *
+   * Requires proxyPools to be configured on ReaderClient.
+   * If a single `proxy` is set, it takes precedence over pools.
+   */
+  proxyTier?: ProxyTier;
 
   /** CSS selector to wait for before considering page loaded */
   waitForSelector?: string;
@@ -132,21 +213,54 @@ export interface ScrapeOptions {
   /** Browser pool configuration (passed from ReaderClient) */
   browserPool?: BrowserPoolConfig;
 
-  /** Browser pool instance (internal, provided by ReaderClient) */
+  /** Browser pool instance (internal, provided by ReaderClient, legacy single pool) */
   pool?: IBrowserPool;
 
-  // ============================================================================
-  // Engine options
-  // ============================================================================
+  /**
+   * Tiered browser pool (internal, provided by ReaderClient).
+   *
+   * When present, this takes precedence over `pool` for the Hero engine.
+   * The Hero engine will ask the tiered pool for the browser bound to
+   * `options.proxy?.url` (falling back to the tier resolved from
+   * `options.proxyTier`).
+   *
+   * Typed as `unknown` to avoid a type cycle between types.ts and
+   * browser/tiered-pool.ts.
+   */
+  tieredPool?: unknown;
 
-  /** Engines to use in order (default: ['http', 'tlsclient', 'hero']) */
-  engines?: EngineName[];
+  /**
+   * Per-proxy concurrency gate (internal, provided by ReaderClient).
+   *
+   * When present, the scraper wraps the entire engine waterfall in
+   * `proxyGate.withSlot(proxyUrl, ...)`, ensuring at most N simultaneous
+   * scrapes go through any single proxy URL at a time. All three engines
+   * share the slot because they race in parallel through the same proxy.
+   *
+   * Typed as `unknown` to avoid a type cycle.
+   */
+  proxyGate?: unknown;
 
-  /** Skip specific engines (e.g., ['http'] to skip native fetch) */
-  skipEngines?: EngineName[];
+  /**
+   * Per-proxy health tracker (internal, provided by ReaderClient).
+   *
+   * Optional. When present, the scraper records success/failure after each
+   * attempt. The tracker emits bench/revive events that the TieredBrowserPool
+   * listens to; the scraper itself just reports outcomes.
+   */
+  healthTracker?: unknown;
 
-  /** Force a specific engine, skipping the cascade */
-  forceEngine?: EngineName;
+  /**
+   * Callback that resolves a proxy URL for a given tier.
+   *
+   * Provided by ReaderClient. Called per-attempt inside the scraper's
+   * retry loop so domain-profile and retry-loop escalation actually swap
+   * proxies between attempts (instead of just flipping a tier string in
+   * options and still using the original proxy).
+   *
+   * Returns the proxy to use, or `undefined` for the direct lane.
+   */
+  resolveProxy?: (tier: ProxyTier | undefined) => ProxyConfig | undefined;
 }
 
 /**
@@ -215,35 +329,31 @@ export interface Page {
 
   /** Crawl depth from base URL */
   depth: number;
-
-  // ============================================================================
-  // Hero-specific fields
-  // ============================================================================
-
-  /** Whether a Cloudflare challenge was detected */
-  hadChallenge?: boolean;
-
-  /** Type of challenge encountered */
-  challengeType?: string;
-
-  /** Time spent waiting for challenge resolution (ms) */
-  waitTimeMs?: number;
 }
 
 /**
  * Individual website scrape result
  */
 export interface WebsiteScrapeResult {
+  /** Raw HTML from the engine before cleaning (always present) */
+  rawHtml: string;
+
   /** Markdown content (present if 'markdown' in formats) */
   markdown?: string;
 
-  /** HTML content (present if 'html' in formats) */
+  /** Cleaned HTML content (present if 'html' in formats) */
   html?: string;
 
   /** Metadata about the scraping operation */
   metadata: {
     /** Base URL that was scraped */
     baseUrl: string;
+
+    /** HTTP status code from the response */
+    statusCode: number;
+
+    /** Engine that successfully scraped this URL */
+    engine: string;
 
     /** Total number of pages scraped */
     totalPages: number;
@@ -329,35 +439,54 @@ export interface ScraperConfig {
  */
 export const DEFAULT_OPTIONS: Omit<
   Required<ScrapeOptions>,
-  "proxy" | "waitForSelector" | "connectionToCore" | "userAgent" | "headers" | "browserPool" | "pool" | "engines" | "skipEngines" | "forceEngine"
+  | "proxy"
+  | "proxyTier"
+  | "waitForSelector"
+  | "connectionToCore"
+  | "userAgent"
+  | "browserPool"
+  | "pool"
+  | "tieredPool"
+  | "proxyGate"
+  | "healthTracker"
+  | "resolveProxy"
+  | "navigationSelectors"
+  | "hardDeadlineMs"
+  | "datacenterTimeoutMs"
+  | "domainProfiles"
+  | "blockDetection"
+  | "urlRewriters"
 > & {
   proxy?: ProxyConfig;
+  proxyTier?: ProxyTier;
   waitForSelector?: string;
   connectionToCore?: any;
   userAgent?: string;
-  headers?: Record<string, string>;
   browserPool?: BrowserPoolConfig;
   pool?: IBrowserPool;
-  engines?: EngineName[];
-  skipEngines?: EngineName[];
-  forceEngine?: EngineName;
+  tieredPool?: unknown;
+  proxyGate?: unknown;
+  healthTracker?: unknown;
+  resolveProxy?: (tier: ProxyTier | undefined) => ProxyConfig | undefined;
+  navigationSelectors?: string[];
+  hardDeadlineMs?: number;
+  datacenterTimeoutMs?: number;
+  domainProfiles?: Record<string, import("./config/domain-profiles.js").DomainProfile>;
+  blockDetection?: ScrapeOptions["blockDetection"];
+  urlRewriters?: ScrapeOptions["urlRewriters"];
 } = {
   urls: [],
   formats: ["markdown"],
   timeoutMs: 30000,
-  includePatterns: [],
-  excludePatterns: [],
   // Content cleaning defaults
   removeAds: true,
   removeBase64Images: true,
   onlyMainContent: true,
   includeTags: [],
   excludeTags: [],
-  skipTLSVerification: true,
   // Batch defaults
-  batchConcurrency: 1,
+  batchConcurrency: 5,
   batchTimeoutMs: 300000,
-  maxRetries: 2,
   onProgress: () => {}, // Default no-op progress callback
   // Hero-specific defaults
   verbose: false,

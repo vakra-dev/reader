@@ -35,22 +35,14 @@ const CLOUDFLARE_TEXT_PATTERNS = [
  *
  * Indicators that the page is served by Cloudflare
  */
-const CLOUDFLARE_INFRA_PATTERNS = [
-  "/cdn-cgi/",
-  "cloudflare",
-  "__cf_bm",
-  "cf-ray",
-];
+const CLOUDFLARE_INFRA_PATTERNS = ["/cdn-cgi/", "cloudflare", "__cf_bm", "cf-ray"];
 
 /**
  * BLOCKED/403 SIGNALS (Cloudflare-specific)
  *
  * Detect when Cloudflare explicitly blocks access
  */
-const CLOUDFLARE_BLOCKED_PATTERNS = [
-  "sorry, you have been blocked",
-  "ray id:",
-];
+const CLOUDFLARE_BLOCKED_PATTERNS = ["sorry, you have been blocked", "ray id:"];
 
 /**
  * Detect if current page is a Cloudflare challenge

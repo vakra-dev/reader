@@ -1,8 +1,8 @@
 /**
- * Engine-specific error classes
+ * Engine error classes
  *
- * These errors are used internally by engines and the orchestrator
- * to signal specific failure conditions and control flow.
+ * Used by the Hero engine and orchestrator to signal specific failure
+ * conditions. Consumed by the scraper's retry/escalation logic.
  */
 
 import type { EngineName } from "./types.js";
@@ -14,7 +14,11 @@ export class EngineError extends Error {
   readonly engine: EngineName;
   readonly retryable: boolean;
 
-  constructor(engine: EngineName, message: string, options?: { cause?: Error; retryable?: boolean }) {
+  constructor(
+    engine: EngineName,
+    message: string,
+    options?: { cause?: Error; retryable?: boolean }
+  ) {
     super(`[${engine}] ${message}`);
     this.name = "EngineError";
     this.engine = engine;
@@ -28,29 +32,16 @@ export class EngineError extends Error {
 }
 
 /**
- * Challenge detected (Cloudflare, CAPTCHA, etc.)
- * Signals orchestrator to try next engine
- */
-export class ChallengeDetectedError extends EngineError {
-  readonly challengeType: string;
-
-  constructor(engine: EngineName, challengeType?: string) {
-    super(engine, `Challenge detected: ${challengeType || "unknown"}`, { retryable: true });
-    this.name = "ChallengeDetectedError";
-    this.challengeType = challengeType || "unknown";
-  }
-}
-
-/**
  * Content too short or empty
- * May indicate blocked page or JS-required content
  */
 export class InsufficientContentError extends EngineError {
   readonly contentLength: number;
   readonly threshold: number;
 
   constructor(engine: EngineName, contentLength: number, threshold: number = 100) {
-    super(engine, `Insufficient content: ${contentLength} chars (threshold: ${threshold})`, { retryable: true });
+    super(engine, `Insufficient content: ${contentLength} chars (threshold: ${threshold})`, {
+      retryable: true,
+    });
     this.name = "InsufficientContentError";
     this.contentLength = contentLength;
     this.threshold = threshold;
@@ -95,35 +86,19 @@ export class EngineUnavailableError extends EngineError {
 }
 
 /**
- * Signal to orchestrator to move to next engine
- * Not a real error - used for control flow
+ * Engine failed — wraps the underlying error with proxy block signals.
+ *
+ * The scraper uses `proxyBlock` to decide whether to escalate to a
+ * stronger proxy tier.
  */
-export class NextEngineSignal extends Error {
-  readonly fromEngine: EngineName;
-  readonly reason: string;
+export class ScrapeFailedError extends Error {
+  /** True when the failure is a proxy-level block (HTTP 401/403/429, redirect loop) */
+  readonly proxyBlock: boolean;
 
-  constructor(fromEngine: EngineName, reason: string) {
-    super(`Next engine signal from ${fromEngine}: ${reason}`);
-    this.name = "NextEngineSignal";
-    this.fromEngine = fromEngine;
-    this.reason = reason;
-  }
-}
-
-/**
- * All engines exhausted without success
- */
-export class AllEnginesFailedError extends Error {
-  readonly attemptedEngines: EngineName[];
-  readonly errors: Map<EngineName, Error>;
-
-  constructor(attemptedEngines: EngineName[], errors: Map<EngineName, Error>) {
-    const summary = attemptedEngines
-      .map((e) => `${e}: ${errors.get(e)?.message || "unknown"}`)
-      .join("; ");
-    super(`All engines failed: ${summary}`);
-    this.name = "AllEnginesFailedError";
-    this.attemptedEngines = attemptedEngines;
-    this.errors = errors;
+  constructor(error: Error, options?: { proxyBlock?: boolean }) {
+    super(error.message);
+    this.name = "ScrapeFailedError";
+    this.cause = error;
+    this.proxyBlock = options?.proxyBlock ?? false;
   }
 }

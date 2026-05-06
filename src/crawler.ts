@@ -1,9 +1,12 @@
-import Hero from "@ulixee/hero";
 import { parseHTML } from "linkedom";
-import type { IBrowserPool } from "./browser/types";
-import { detectChallenge } from "./cloudflare/detector";
-import { waitForChallengeResolution } from "./cloudflare/handler";
-import { resolveUrl, isValidUrl, isSameDomain, getUrlKey, isContentUrl, shouldIncludeUrl } from "./utils/url-helpers";
+import {
+  resolveUrl,
+  isValidUrl,
+  isSameDomain,
+  getUrlKey,
+  isContentUrl,
+  shouldIncludeUrl,
+} from "./utils/url-helpers";
 import { fetchRobotsTxt, isUrlAllowed, type RobotsRules } from "./utils/robots-parser";
 import { rateLimit } from "./utils/rate-limiter";
 import { createLogger } from "./utils/logger";
@@ -12,72 +15,31 @@ import type { CrawlOptions, CrawlResult, CrawlUrl, CrawlMetadata } from "./crawl
 import type { ScrapeResult } from "./types";
 
 /**
- * Crawler class for discovering and optionally scraping pages
+ * Crawler class for discovering and optionally scraping pages.
  *
- * Features:
- * - BFS/DFS crawling with depth control
- * - Automatic Cloudflare challenge handling
- * - Link extraction and filtering
- * - Optional full content scraping
- * - URL deduplication
- *
- * @example
- * const crawler = new Crawler({
- *   url: 'https://example.com',
- *   depth: 2,
- *   maxPages: 20,
- *   scrape: true
- * });
- *
- * const result = await crawler.crawl();
- * console.log(`Discovered ${result.urls.length} URLs`);
+ * Discovery and scraping both go through the scraper, which handles
+ * Hero, proxy escalation, and timeouts. The crawler owns BFS traversal,
+ * link extraction, deduplication, robots.txt, and rate limiting.
  */
 export class Crawler {
-  private options: Omit<
-    Required<CrawlOptions>,
-    "proxy" | "timeoutMs" | "userAgent" | "includePatterns" | "excludePatterns" | "pool" | "removeAds" | "removeBase64Images"
-  > & {
-    proxy?: CrawlOptions["proxy"];
-    timeoutMs?: CrawlOptions["timeoutMs"];
-    userAgent?: CrawlOptions["userAgent"];
-    includePatterns?: string[];
-    excludePatterns?: string[];
-    removeAds?: boolean;
-    removeBase64Images?: boolean;
-  };
+  private options: CrawlOptions;
   private visited: Set<string> = new Set();
   private queue: Array<{ url: string; depth: number }> = [];
   private urls: CrawlUrl[] = [];
-  private pool: IBrowserPool;
   private logger = createLogger("crawler");
   private robotsRules: RobotsRules | null = null;
 
   constructor(options: CrawlOptions) {
-    // Pool must be provided by client
-    if (!options.pool) {
-      throw new Error("Browser pool must be provided. Use ReaderClient for automatic pool management.");
-    }
-    this.pool = options.pool;
-
     this.options = {
-      url: options.url,
-      depth: options.depth || 1,
-      maxPages: options.maxPages || 20,
-      scrape: options.scrape || false,
-      delayMs: options.delayMs || 1000,
-      timeoutMs: options.timeoutMs,
-      includePatterns: options.includePatterns,
-      excludePatterns: options.excludePatterns,
-      formats: options.formats || ["markdown", "html"],
-      scrapeConcurrency: options.scrapeConcurrency || 2,
-      proxy: options.proxy,
-      userAgent: options.userAgent,
-      verbose: options.verbose || false,
-      showChrome: options.showChrome || false,
-      connectionToCore: options.connectionToCore,
-      // Content cleaning options
-      removeAds: options.removeAds,
-      removeBase64Images: options.removeBase64Images,
+      depth: 1,
+      maxPages: 20,
+      scrape: false,
+      delayMs: 1000,
+      formats: ["markdown", "html"],
+      scrapeConcurrency: 2,
+      verbose: false,
+      showChrome: false,
+      ...options,
     };
   }
 
@@ -87,23 +49,21 @@ export class Crawler {
   async crawl(): Promise<CrawlResult> {
     const startTime = Date.now();
 
-    // Fetch robots.txt rules before crawling
+    // Fetch robots.txt rules
     this.robotsRules = await fetchRobotsTxt(this.options.url);
     if (this.robotsRules) {
       this.logger.info("Loaded robots.txt rules");
     }
 
-    // Pool is managed by ReaderClient - just use it
-    // Add seed URL to queue (if allowed by robots.txt)
+    // Add seed URL to queue
     if (isUrlAllowed(this.options.url, this.robotsRules)) {
       this.queue.push({ url: this.options.url, depth: 0 });
     } else {
       this.logger.warn(`Seed URL blocked by robots.txt: ${this.options.url}`);
     }
 
-    // Crawl URLs
-    while (this.queue.length > 0 && this.urls.length < this.options.maxPages) {
-      // Check timeout
+    // BFS crawl
+    while (this.queue.length > 0 && this.urls.length < (this.options.maxPages ?? 20)) {
       if (this.options.timeoutMs && Date.now() - startTime > this.options.timeoutMs) {
         this.logger.warn(`Crawl timed out after ${this.options.timeoutMs}ms`);
         break;
@@ -116,34 +76,33 @@ export class Crawler {
         continue;
       }
 
-      // Fetch page
+      // Fetch page via scraper
       const result = await this.fetchPage(item.url);
 
       if (result) {
         this.urls.push(result.crawlUrl);
         this.visited.add(urlKey);
 
-        // Extract links from the fetched HTML if not at max depth
-        if (item.depth < this.options.depth) {
+        // Extract links if not at max depth
+        if (item.depth < (this.options.depth ?? 1)) {
           const links = this.extractLinks(result.html, item.url, item.depth + 1);
           this.queue.push(...links);
         }
       }
 
-      // Rate limit (use robots.txt crawl-delay if specified, otherwise use configured delay)
-      const delay = this.robotsRules?.crawlDelay || this.options.delayMs;
+      // Rate limit
+      const delay = this.robotsRules?.crawlDelay || (this.options.delayMs ?? 1000);
       await rateLimit(delay);
     }
 
-    // Build metadata
     const metadata: CrawlMetadata = {
       totalUrls: this.urls.length,
-      maxDepth: this.options.depth,
+      maxDepth: this.options.depth ?? 1,
       totalDuration: Date.now() - startTime,
       seedUrl: this.options.url,
     };
 
-    // Optionally scrape all discovered URLs
+    // Optionally scrape all discovered URLs for content
     let scraped: ScrapeResult | undefined;
     if (this.options.scrape) {
       scraped = await this.scrapeDiscoveredUrls();
@@ -157,69 +116,55 @@ export class Crawler {
   }
 
   /**
-   * Fetch a single page and extract basic info
+   * Fetch a single page for discovery using the scraper.
+   *
+   * Calls scrape() with onlyMainContent=false so link extraction gets
+   * the full page HTML. The scraper handles Hero, proxy escalation,
+   * and timeouts internally.
    */
   private async fetchPage(url: string): Promise<{ crawlUrl: CrawlUrl; html: string } | null> {
     try {
-      return await this.pool.withBrowser(async (hero: Hero) => {
-        // Navigate
-        await hero.goto(url, { timeoutMs: 30000 });
-        await hero.waitForPaintingStable();
-
-        // Handle Cloudflare challenge
-        const initialUrl = await hero.url;
-        const detection = await detectChallenge(hero);
-
-        if (detection.isChallenge) {
-          if (this.options.verbose) {
-            this.logger.info(`Challenge detected on ${url}`);
-          }
-
-          const result = await waitForChallengeResolution(hero, {
-            maxWaitMs: 45000,
-            pollIntervalMs: 500,
-            verbose: this.options.verbose,
-            initialUrl,
-          });
-
-          if (!result.resolved) {
-            throw new Error(`Challenge not resolved`);
-          }
-        }
-
-        // Extract basic info and HTML
-        const title = await hero.document.title;
-        const html = await hero.document.documentElement.outerHTML;
-
-        // Try to extract description from meta tags
-        let description: string | null = null;
-        try {
-          const metaDesc = await hero.document.querySelector('meta[name="description"]');
-          if (metaDesc) {
-            description = await metaDesc.getAttribute("content");
-          }
-        } catch {
-          // No description found
-        }
-
-        return {
-          crawlUrl: {
-            url,
-            title: title || "Untitled",
-            description,
-          },
-          html,
-        };
+      const result = await scrape({
+        urls: [url],
+        formats: [], // We only need rawHtml for discovery
+        onlyMainContent: false,
+        proxy: this.options.proxy,
+        proxyTier: this.options.proxyTier,
+        timeoutMs: this.options.timeoutMs,
+        verbose: this.options.verbose,
+        showChrome: this.options.showChrome,
+        connectionToCore: this.options.connectionToCore,
+        pool: this.options.pool,
+        tieredPool: this.options.tieredPool,
+        proxyGate: this.options.proxyGate,
+        healthTracker: this.options.healthTracker,
+        resolveProxy: this.options.resolveProxy,
       });
-    } catch (error: any) {
-      this.logger.error(`Failed to fetch ${url}: ${error.message}`);
+
+      if (result.data.length === 0) {
+        this.logger.warn(`[crawler] No data returned for ${url}`);
+        return null;
+      }
+
+      const page = result.data[0];
+
+      return {
+        crawlUrl: {
+          url: page.metadata.baseUrl,
+          title: page.metadata.website?.title || "Untitled",
+          description: page.metadata.website?.description ?? null,
+        },
+        html: page.rawHtml,
+      };
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`[crawler] Failed to fetch ${url}: ${msg}`);
       return null;
     }
   }
 
   /**
    * Extract links from HTML content using DOM parsing
-   * Handles all href formats (single quotes, double quotes, unquoted)
    */
   private extractLinks(
     html: string,
@@ -229,19 +174,17 @@ export class Crawler {
     const links: Array<{ url: string; depth: number }> = [];
     const { document } = parseHTML(html);
 
-    // Use proper DOM API to find all anchor elements with href
     document.querySelectorAll("a[href]").forEach((anchor: Element) => {
       const rawHref = anchor.getAttribute("href");
       if (!rawHref) return;
 
-      // Trim whitespace from href
       const href = rawHref.trim();
       if (!href) return;
 
-      // Skip fragment-only links (#, #section, etc.)
+      // Skip fragment-only links
       if (href.startsWith("#")) return;
 
-      // Skip non-HTTP schemes (javascript:, mailto:, tel:, data:, blob:, ftp:)
+      // Skip non-HTTP schemes
       const lowerHref = href.toLowerCase();
       if (
         lowerHref.startsWith("javascript:") ||
@@ -258,7 +201,7 @@ export class Crawler {
       let resolved = resolveUrl(href, baseUrl);
       if (!resolved || !isValidUrl(resolved)) return;
 
-      // Strip hash fragments from URLs
+      // Strip hash fragments
       try {
         const parsed = new URL(resolved);
         parsed.hash = "";
@@ -267,19 +210,20 @@ export class Crawler {
         return;
       }
 
-      // Check if same domain
+      // Same domain only
       if (!isSameDomain(resolved, this.options.url)) return;
 
-      // Check if content page (skip legal, policy, utility pages)
+      // Content pages only
       if (!isContentUrl(resolved)) return;
 
-      // Check include/exclude patterns
-      if (!shouldIncludeUrl(resolved, this.options.includePatterns, this.options.excludePatterns)) return;
+      // Include/exclude patterns
+      if (!shouldIncludeUrl(resolved, this.options.includePatterns, this.options.excludePatterns))
+        return;
 
-      // Check if allowed by robots.txt
+      // Robots.txt
       if (!isUrlAllowed(resolved, this.robotsRules)) return;
 
-      // Check if already visited or queued
+      // Deduplication
       const urlKey = getUrlKey(resolved);
       if (this.visited.has(urlKey) || this.queue.some((q) => getUrlKey(q.url) === urlKey)) {
         return;
@@ -292,21 +236,25 @@ export class Crawler {
   }
 
   /**
-   * Scrape all discovered URLs
+   * Scrape all discovered URLs for content.
    */
   private async scrapeDiscoveredUrls(): Promise<ScrapeResult> {
     const urls = this.urls.map((u) => u.url);
 
     return scrape({
       urls,
-      formats: this.options.formats,
-      batchConcurrency: this.options.scrapeConcurrency,
+      formats: this.options.formats || ["markdown", "html"],
+      batchConcurrency: this.options.scrapeConcurrency || 2,
       proxy: this.options.proxy,
+      proxyTier: this.options.proxyTier,
       userAgent: this.options.userAgent,
       verbose: this.options.verbose,
       showChrome: this.options.showChrome,
-      pool: this.pool,
-      // Content cleaning options
+      pool: this.options.pool,
+      tieredPool: this.options.tieredPool,
+      proxyGate: this.options.proxyGate,
+      healthTracker: this.options.healthTracker,
+      resolveProxy: this.options.resolveProxy,
       removeAds: this.options.removeAds,
       removeBase64Images: this.options.removeBase64Images,
     });
@@ -315,17 +263,6 @@ export class Crawler {
 
 /**
  * Convenience function to crawl a website
- *
- * @param options - Crawl options
- * @returns Crawl result
- *
- * @example
- * const result = await crawl({
- *   url: 'https://example.com',
- *   depth: 2,
- *   maxPages: 20,
- *   scrape: true
- * });
  */
 export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
   const crawler = new Crawler(options);

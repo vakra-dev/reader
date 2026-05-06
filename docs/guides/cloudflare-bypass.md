@@ -45,19 +45,9 @@ Reader detects and handles these challenge types:
 | **CAPTCHA** | hCaptcha/reCAPTCHA widget | Cannot bypass (requires human) |
 | **WAF Block** | 403/1020 error codes | Cannot bypass (IP blocked) |
 
-## Detection API
+## How Detection Works
 
-You can manually check for challenges:
-
-```typescript
-import { detectChallenge } from "@vakra-dev/reader";
-
-const detection = await detectChallenge(hero);
-
-console.log("Is challenge:", detection.isChallenge);
-console.log("Type:", detection.type);
-console.log("Signals:", detection.signals);
-```
+Challenge detection and resolution is handled automatically by the engine. You don't need to call any detection functions manually - Reader detects and resolves challenges during every scrape.
 
 ### Detection Signals
 
@@ -79,32 +69,14 @@ The detector looks for multiple signals:
 - `/cdn-cgi/challenge-platform/`
 - `__cf_chl_` parameters
 
-## Resolution API
+## Resolution
 
-Wait for a challenge to be resolved:
-
-```typescript
-import { waitForChallengeResolution } from "@vakra-dev/reader";
-
-const result = await waitForChallengeResolution(hero, {
-  maxWaitMs: 45000,        // Maximum wait time
-  pollIntervalMs: 500,     // Check every 500ms
-  verbose: true,           // Log progress
-  initialUrl: await hero.url,
-});
-
-if (result.resolved) {
-  console.log(`Resolved via: ${result.method}`);
-  console.log(`Wait time: ${result.waitedMs}ms`);
-} else {
-  console.log("Challenge not resolved within timeout");
-}
-```
-
-### Resolution Methods
+The engine automatically resolves challenges using two methods:
 
 1. **Redirect Detection** - URL changes after challenge is solved
 2. **Element Removal** - Challenge DOM elements disappear
+
+Resolution runs automatically during every scrape with a 45-second timeout.
 
 ## Improving Success Rate
 
@@ -223,30 +195,16 @@ const result = await reader.scrape({
 await reader.close();
 ```
 
-### Check Detection Results
+### Verbose Mode
+
+Enable verbose logging to see challenge detection and resolution in action:
 
 ```typescript
-import { detectChallenge } from "@vakra-dev/reader";
-
-// After navigation
-const detection = await detectChallenge(hero);
-console.log(JSON.stringify(detection, null, 2));
-```
-
-### Monitor Network
-
-Hero supports network monitoring:
-
-```typescript
-await pool.withBrowser(async (hero) => {
-  hero.on("resource", (resource) => {
-    if (resource.url.includes("cdn-cgi")) {
-      console.log("Cloudflare resource:", resource.url);
-    }
-  });
-
-  await hero.goto("https://protected-site.com");
+const reader = new ReaderClient({ verbose: true });
+const result = await reader.scrape({
+  urls: ["https://protected-site.com"],
 });
+await reader.close();
 ```
 
 ## Best Practices
@@ -259,52 +217,28 @@ await pool.withBrowser(async (hero) => {
 6. **Respect robots.txt** when possible
 7. **Cache results** to minimize repeat requests
 
-## Example: Full Challenge Handling
+## Example: Scraping a Cloudflare-Protected Site
+
+Challenge handling is automatic. Just scrape normally:
 
 ```typescript
-import { scrape, detectChallenge, waitForChallengeResolution } from "@vakra-dev/reader";
-import { BrowserPool } from "@vakra-dev/reader";
+import { ReaderClient } from "@vakra-dev/reader";
 
-async function scrapeWithChallengeHandling(url: string) {
-  const pool = new BrowserPool({ size: 1 });
-  await pool.initialize();
+const reader = new ReaderClient({
+  proxyPools: {
+    datacenter: [{ url: "http://user:pass@dc-proxy:8080" }],
+    residential: [{ url: "http://user:pass@res-proxy:8080" }],
+  },
+});
 
-  try {
-    return await pool.withBrowser(async (hero) => {
-      // Navigate to page
-      await hero.goto(url, { timeoutMs: 60000 });
+// Reader auto-detects Cloudflare and escalates to residential proxy if needed
+const result = await reader.scrape({
+  urls: ["https://cloudflare-protected-site.com"],
+  proxyTier: "auto",
+});
 
-      // Check for challenge
-      const detection = await detectChallenge(hero);
-
-      if (detection.isChallenge) {
-        console.log(`Challenge detected: ${detection.type}`);
-
-        // Wait for resolution
-        const resolution = await waitForChallengeResolution(hero, {
-          maxWaitMs: 45000,
-          pollIntervalMs: 500,
-          verbose: true,
-          initialUrl: url,
-        });
-
-        if (!resolution.resolved) {
-          throw new Error(`Challenge not resolved: ${detection.type}`);
-        }
-
-        console.log(`Challenge resolved in ${resolution.waitedMs}ms`);
-      }
-
-      // Extract content
-      const html = await hero.document.body.innerHTML;
-      const title = await hero.document.title;
-
-      return { html, title };
-    });
-  } finally {
-    await pool.shutdown();
-  }
-}
+console.log(result.data[0].markdown);
+await reader.close();
 ```
 
 ## Related Guides

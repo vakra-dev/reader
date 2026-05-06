@@ -466,4 +466,3 @@ See [examples/deployment/docker/](../../examples/deployment/docker/) for a compl
 
 - [Production Server](production-server.md) - Server setup
 - [Job Queues](job-queues.md) - Async processing
-- [Serverless](serverless.md) - Lambda/Vercel deployment

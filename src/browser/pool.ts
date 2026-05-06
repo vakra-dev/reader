@@ -66,7 +66,6 @@ export class BrowserPool implements IBrowserPool {
   private totalRequestDuration = 0;
   private showChrome: boolean;
   private connectionToCore?: any;
-  private userAgent?: string;
   private verbose: boolean;
   private logger = createLogger("pool");
 
@@ -75,14 +74,13 @@ export class BrowserPool implements IBrowserPool {
     proxy?: ProxyConfig,
     showChrome: boolean = false,
     connectionToCore?: any,
-    userAgent?: string,
+    _userAgent?: string,
     verbose: boolean = false
   ) {
     this.config = { ...DEFAULT_POOL_CONFIG, ...config };
     this.proxy = proxy;
     this.showChrome = showChrome;
     this.connectionToCore = connectionToCore;
-    this.userAgent = userAgent;
     this.verbose = verbose;
   }
 
@@ -163,7 +161,9 @@ export class BrowserPool implements IBrowserPool {
     if (!instance) {
       // No available instances, queue the request
       if (this.verbose) {
-        this.logger.info(`No browsers available, queuing request (queue: ${this.queue.length + 1})`);
+        this.logger.info(
+          `No browsers available, queuing request (queue: ${this.queue.length + 1})`
+        );
       }
       return this.queueRequest();
     }
@@ -293,7 +293,6 @@ export class BrowserPool implements IBrowserPool {
       proxy: this.proxy,
       showChrome: this.showChrome,
       connectionToCore: this.connectionToCore,
-      userAgent: this.userAgent,
     });
 
     const hero = new Hero(heroConfig);
