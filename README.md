@@ -114,9 +114,9 @@ Get an API key at [app.reader.dev](https://app.reader.dev) and start scraping im
 ```typescript
 import { ReaderClient } from "@vakra-dev/reader-js";
 
-const client = new ReaderClient({ apiKey: process.env.READER_API_KEY });
+const reader = new ReaderClient({ apiKey: process.env.READER_API_KEY });
 
-const result = await client.read({ url: "https://example.com" });
+const result = await reader.read({ url: "https://example.com" });
 if (result.kind === "scrape") {
   console.log(result.data.markdown);
 }
