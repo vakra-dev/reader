@@ -6,8 +6,14 @@
 #   ./scripts/release.sh 0.2.0
 #   ./scripts/release.sh 0.2.0 --dry-run
 #
-# Idempotent: safe to rerun after a failure. Every step checks current
-# state and skips if already done. No manual cleanup needed.
+# What it does (in order):
+#   1. Validates: clean working tree, on main, tag doesn't exist
+#   2. Bumps version in package.json + package-lock.json
+#   3. Runs all checks (typecheck, lint, format, test, build)
+#   4. If checks fail: reverts version bump, exits
+#   5. If checks pass: commits, tags, pushes commit+tag, creates release
+#
+# Nothing is pushed until all checks pass. Dry run never modifies files.
 #
 
 set -euo pipefail
@@ -30,8 +36,15 @@ TAG="v$VERSION"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Load nvm if available
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm use v22 > /dev/null 2>&1 || true
+
 echo "=== reader release $TAG ==="
 echo ""
+
+# ─── Preflight ────────────────────────────────────────────────────────
 
 if ! command -v gh &>/dev/null; then
   echo "Error: GitHub CLI (gh) is required. Install: brew install gh"
@@ -39,120 +52,114 @@ if ! command -v gh &>/dev/null; then
 fi
 
 BRANCH=$(git branch --show-current)
-echo "Branch: $BRANCH"
-echo "Version: $VERSION"
-echo ""
-
-# --- Step 1: Bump version ---
-echo "[1/7] Checking version..."
-
-CURRENT_VERSION=$(node -p "require('./package.json').version")
-
-if [ "$CURRENT_VERSION" != "$VERSION" ]; then
-  npm version "$VERSION" --no-git-tag-version --allow-same-version
-  echo "  package.json: $CURRENT_VERSION -> $VERSION"
-  NEED_BUMP=true
-else
-  echo "  package.json: already $VERSION"
-  NEED_BUMP=false
-fi
-
-# --- Step 2: Typecheck ---
-echo ""
-echo "[2/7] Typechecking..."
-npx tsc --noEmit
-echo "  Typecheck passed."
-
-# --- Step 3: Lint ---
-echo ""
-echo "[3/7] Linting..."
-npm run lint
-echo "  Lint passed."
-
-# --- Step 4: Test ---
-echo ""
-echo "[4/7] Running tests..."
-npm test
-echo "  All tests passed."
-
-# --- Step 5: Build ---
-echo ""
-echo "[5/7] Building..."
-npm run build
-echo "  Build succeeded."
-
-# --- Step 6: Commit version bump if needed ---
-echo ""
-echo "[6/7] Committing..."
-
-if [ "$NEED_BUMP" = true ]; then
-  if [ "$DRY_RUN" = "--dry-run" ]; then
-    echo "  [dry-run] Would commit version bump to $VERSION"
-  else
-    git add package.json package-lock.json
-    git commit -m "chore: bump version to $VERSION"
-    echo "  Committed version bump."
-  fi
-else
-  echo "  Version already correct, nothing to commit."
+if [ "$BRANCH" != "main" ]; then
+  echo "Error: Must be on main branch (currently on $BRANCH)"
+  exit 1
 fi
 
 if [ -n "$(git status --porcelain)" ]; then
-  echo "  Note: working tree has uncommitted changes (not included in release)."
-fi
-
-# --- Step 7: Push, tag, release ---
-echo ""
-echo "[7/7] Tagging and releasing..."
-
-if [ "$BRANCH" = "main" ]; then
-  if [ "$DRY_RUN" != "--dry-run" ]; then
-    git push origin main 2>/dev/null || true
-  fi
-else
-  if [ "$DRY_RUN" = "--dry-run" ]; then
-    echo "  [dry-run] Would merge $BRANCH -> main"
-  else
-    git push origin "$BRANCH" 2>/dev/null || true
-    git checkout main
-    git pull origin main
-    git merge "$BRANCH" --no-edit
-    git push origin main
-    echo "  Merged $BRANCH -> main and pushed."
-  fi
+  echo "Error: Working tree is dirty. Commit or stash changes first."
+  git status --short
+  exit 1
 fi
 
 if git rev-parse "$TAG" &>/dev/null; then
-  echo "  Tag $TAG already exists, skipping."
-else
-  if [ "$DRY_RUN" = "--dry-run" ]; then
-    echo "  [dry-run] Would create tag $TAG"
-  else
-    git tag "$TAG"
-    git push origin "$TAG"
-    echo "  Created and pushed $TAG."
-  fi
+  echo "Error: Tag $TAG already exists"
+  exit 1
 fi
 
-if gh release view "$TAG" &>/dev/null 2>&1; then
-  echo "  Release $TAG already exists, skipping."
-else
-  PREV_TAG=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || echo "")
-  if [ -n "$PREV_TAG" ]; then
-    NOTES=$(git log "$PREV_TAG..$TAG" --pretty=format:"- %s" --no-merges)
-  else
-    NOTES="Initial release"
-  fi
+CURRENT_VERSION=$(node -p "require('./package.json').version")
+echo "Current: $CURRENT_VERSION"
+echo "Release: $VERSION"
+echo ""
 
-  if [ "$DRY_RUN" = "--dry-run" ]; then
-    echo "  [dry-run] Would create release $TAG"
-    echo "  Notes:"
-    echo "$NOTES" | sed 's/^/    /'
-  else
-    gh release create "$TAG" --title "$TAG" --notes "$NOTES"
-    echo "  Release created."
-    echo "  -> publish.yml will build + publish to npm"
+if [ "$DRY_RUN" = "--dry-run" ]; then
+  echo "[DRY RUN] No files will be modified."
+  echo ""
+fi
+
+# ─── Step 1: Bump version ────────────────────────────────────────────
+
+echo "[1/5] Bumping version..."
+if [ "$DRY_RUN" != "--dry-run" ]; then
+  npm version "$VERSION" --no-git-tag-version --allow-same-version > /dev/null
+fi
+echo "  $CURRENT_VERSION -> $VERSION"
+
+# ─── Step 2: Run all checks ──────────────────────────────────────────
+
+echo "[2/5] Running checks..."
+
+# If any check fails, revert the version bump before exiting
+revert_on_failure() {
+  if [ "$DRY_RUN" != "--dry-run" ]; then
+    git checkout -- package.json package-lock.json 2>/dev/null || true
+    echo ""
+    echo "  Version bump reverted. Fix the issue and re-run."
   fi
+}
+trap revert_on_failure ERR
+
+echo "  Typecheck..."
+npx tsc --noEmit
+
+echo "  Lint..."
+npm run lint > /dev/null 2>&1
+
+echo "  Format..."
+npm run format:check > /dev/null 2>&1
+
+echo "  Test..."
+TEST_OUTPUT=$(npm test 2>&1)
+echo "$TEST_OUTPUT" | grep -E "Test Files|Tests " | sed 's/^/  /'
+
+echo "  Build..."
+npm run build > /dev/null 2>&1
+
+trap - ERR
+echo "  All checks passed."
+
+# ─── Step 3: Commit + tag ────────────────────────────────────────────
+
+echo "[3/5] Committing..."
+if [ "$DRY_RUN" = "--dry-run" ]; then
+  echo "  Would commit: chore: release $TAG"
+else
+  git add package.json package-lock.json
+  git commit -m "chore: release $TAG"
+  git tag "$TAG"
+  echo "  Committed and tagged $TAG"
+fi
+
+# ─── Step 4: Push ────────────────────────────────────────────────────
+
+echo "[4/5] Pushing..."
+if [ "$DRY_RUN" = "--dry-run" ]; then
+  echo "  Would push main + $TAG"
+else
+  git push origin main --tags --no-verify
+  echo "  Pushed main + $TAG"
+fi
+
+# ─── Step 5: GitHub release ──────────────────────────────────────────
+
+echo "[5/5] Creating release..."
+
+PREV_TAG=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || echo "")
+if [ -n "$PREV_TAG" ]; then
+  NOTES=$(git log "$PREV_TAG..$TAG" --pretty=format:"- %s" --no-merges)
+else
+  NOTES="Initial release"
+fi
+
+if [ "$DRY_RUN" = "--dry-run" ]; then
+  echo "  Would create release $TAG with notes:"
+  echo "$NOTES" | sed 's/^/    /'
+  echo ""
+  echo "[DRY RUN] Nothing was modified."
+else
+  gh release create "$TAG" --title "$TAG" --notes "$NOTES"
+  echo "  https://github.com/vakra-dev/reader/releases/tag/$TAG"
 fi
 
 echo ""
