@@ -109,7 +109,7 @@ npm install @vakra-dev/reader
 
 ### Cloud (Fastest)
 
-Get an API key at [app.reader.dev](https://app.reader.dev) and start scraping immediately:
+Get an API key at [console.reader.dev](https://console.reader.dev) and start scraping immediately:
 
 ```typescript
 import { ReaderClient } from "@vakra-dev/reader-js";
