@@ -47,5 +47,7 @@ temp/
 # Claude Code context
 CLAUDE.md
 
-# Deployment configs (contain sensitive data)
+# Deployment configs (contain server paths / sensitive data)
 deploy/
+ecosystem.config.cjs
+.env.*
