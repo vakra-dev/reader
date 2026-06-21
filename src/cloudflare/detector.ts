@@ -25,9 +25,12 @@ const CLOUDFLARE_CHALLENGE_SELECTORS = [
  */
 const CLOUDFLARE_TEXT_PATTERNS = [
   "checking if the site connection is secure",
+  "performing security verification",
+  "verification successful",
   "this process is automatic. your browser will redirect",
   "ray id:",
   "performance & security by cloudflare",
+  "uses a security service to protect against malicious bots",
 ];
 
 /**
