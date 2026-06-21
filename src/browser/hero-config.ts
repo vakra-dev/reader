@@ -42,14 +42,13 @@ export function createHeroConfig(options: HeroConfigOptions = {}): any {
     showChrome: options.showChrome ?? false,
 
     // ============================================================================
-    // MITM proxy disabled
+    // TLS fingerprint emulation via MITM (required)
     // ============================================================================
-    // Real Chrome already produces correct TLS fingerprints. Hero's MITM proxy
-    // intercepts and re-encrypts traffic which Cloudflare detects as non-standard.
-    // Disabling MITM lets Chrome handle TLS directly - more reliable for modern
-    // anti-bot systems. Stealth emulation scripts (webdriver=false, navigator
-    // spoofing, WebRTC masking) still work without MITM.
-    disableMitm: true,
+    // Hero requires MITM for page load detection (waitForLoad, waitForPaintingStable
+    // depend on MITM tracking network requests). Disabling MITM causes all
+    // navigations to hang because Hero can't detect when loading completes.
+    // For sites where MITM causes Cloudflare issues, use browser sessions instead.
+    disableMitm: false,
 
     // ============================================================================
     // Session management
