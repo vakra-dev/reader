@@ -84,6 +84,12 @@ export interface CrawlOptions {
   tieredPool?: unknown;
 
   /**
+   * Playwright browser pool (internal, provided by ReaderClient).
+   * Typed as `unknown` to avoid a type cycle.
+   */
+  playwrightPool?: unknown;
+
+  /**
    * Per-proxy concurrency gate (internal, provided by ReaderClient).
    *
    * When present, the crawler wraps every fetchPage in `proxyGate.withSlot`

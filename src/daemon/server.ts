@@ -175,7 +175,7 @@ export class DaemonServer {
 
     // Verify each configured proxy by GETting api.ipify.org through it.
     // This catches dead URLs, wrong creds, and reachability problems BEFORE
-    // we spend the cost of launching N Hero instances. Throws a clear
+    // we spend the cost of launching Chrome instances. Throws a clear
     // multi-line error if any proxy fails — the daemon won't start with a
     // broken config.
     if (proxyPools) {
@@ -199,13 +199,10 @@ export class DaemonServer {
     this.client = new ReaderClient(clientOptions);
     await this.client.start();
 
-    // Guard against uncaught exceptions from Hero internals.
-    // Hero's MITM proxy can throw after a page closes (e.g.,
-    // Resources.onMitmError accessing null framesManager). These
-    // are non-fatal race conditions — the scrape already failed,
-    // this is cleanup code hitting a null reference. Log and continue.
+    // Guard against uncaught exceptions from browser internals.
+    // Non-fatal race conditions — log and continue.
     process.on("uncaughtException", (err) => {
-      logger.error({ err }, "Uncaught exception (non-fatal, Hero internal)");
+      logger.error({ err }, "Uncaught exception (non-fatal)");
     });
 
     // Create HTTP server

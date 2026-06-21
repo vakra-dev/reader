@@ -1,17 +1,18 @@
 /**
  * Engine types for the scraping engine.
  *
- * Reader uses a single engine: Hero (Ulixee), a full browser with
- * JavaScript execution, TLS fingerprinting, and Cloudflare bypass.
+ * Reader supports two engines:
+ *   - Playwright: Full browser via CDP, no MITM (default, recommended)
+ *   - Hero (Ulixee): Full browser with TLS fingerprinting via MITM (legacy)
  */
 
 import type { ScrapeOptions } from "../types.js";
 import type { Logger } from "../utils/logger.js";
 
 /**
- * Engine name — Hero is the only engine.
+ * Engine name identifier.
  */
-export type EngineName = "hero";
+export type EngineName = "hero" | "playwright";
 
 /**
  * Result returned by the engine after scraping

@@ -31,7 +31,7 @@ import type { ProxyHealthTracker } from "./proxy/health-tracker.js";
 import { redactProxyUrl } from "./browser/proxy-bound-browser.js";
 
 /** Default hard deadline for any single URL (ms). */
-const DEFAULT_HARD_DEADLINE_MS = 30_000;
+const DEFAULT_HARD_DEADLINE_MS = 45_000;
 
 /** Default timeout for the first datacenter proxy attempt (ms). */
 const DEFAULT_DATACENTER_TIMEOUT_MS = 10_000;

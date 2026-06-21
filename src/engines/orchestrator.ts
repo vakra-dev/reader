@@ -1,14 +1,16 @@
 /**
  * Engine Orchestrator
  *
- * Runs Hero against a URL, applies a minimal quality check, and returns
- * the result. Detects proxy-level blocks (HTTP 401/403/429, redirect
- * loops) so the scraper's retry loop can escalate to a stronger proxy.
+ * Runs the scraping engine against a URL, applies a minimal quality check,
+ * and returns the result. Detects proxy-level blocks (HTTP 401/403/429,
+ * redirect loops) so the scraper's retry loop can escalate to a stronger proxy.
+ *
+ * Uses Playwright engine by default. Hero engine is retained for fallback.
  */
 
 import type { EngineMeta, EngineResult } from "./types.js";
 import { ScrapeFailedError, HttpError, EngineUnavailableError } from "./errors.js";
-import { heroEngine } from "./hero/index.js";
+import { playwrightEngine } from "./playwright/index.js";
 import type { Logger } from "../utils/logger.js";
 
 /**
@@ -74,7 +76,7 @@ export class EngineOrchestrator {
   }
 
   /**
-   * Scrape a URL using Hero.
+   * Scrape a URL using the active engine (Playwright by default).
    *
    * @throws ScrapeFailedError on failure (with proxyBlock flag for escalation)
    */
@@ -87,14 +89,18 @@ export class EngineOrchestrator {
       else logger?.debug(msg);
     };
 
-    if (!heroEngine.isAvailable()) {
-      throw new ScrapeFailedError(new EngineUnavailableError("hero", "Hero engine not available"));
+    const engine = playwrightEngine;
+
+    if (!engine.isAvailable()) {
+      throw new ScrapeFailedError(
+        new EngineUnavailableError("playwright", "Playwright engine not available")
+      );
     }
 
-    log(`[orchestrator] Scraping ${meta.url} with Hero`);
+    log(`[orchestrator] Scraping ${meta.url} with Playwright`);
 
     try {
-      const result = await heroEngine.scrape(meta);
+      const result = await engine.scrape(meta);
 
       const quality = this.assessQuality(result);
       if (!quality.passed) {
@@ -102,7 +108,7 @@ export class EngineOrchestrator {
         throw new ScrapeFailedError(new Error(`Quality check failed: ${quality.reason}`));
       }
 
-      log(`[orchestrator] ✓ Hero succeeded in ${result.duration}ms`);
+      log(`[orchestrator] ✓ Playwright succeeded in ${result.duration}ms`);
       return { ...result, blocked: false };
     } catch (error: unknown) {
       // Already wrapped — re-throw

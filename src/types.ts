@@ -230,6 +230,14 @@ export interface ScrapeOptions {
   tieredPool?: unknown;
 
   /**
+   * Playwright browser pool (internal, provided by ReaderClient).
+   *
+   * When present, the Playwright engine uses this pool for browser pages.
+   * Typed as `unknown` to avoid a type cycle.
+   */
+  playwrightPool?: unknown;
+
+  /**
    * Per-proxy concurrency gate (internal, provided by ReaderClient).
    *
    * When present, the scraper wraps the entire engine waterfall in
@@ -447,6 +455,7 @@ export const DEFAULT_OPTIONS: Omit<
   | "browserPool"
   | "pool"
   | "tieredPool"
+  | "playwrightPool"
   | "proxyGate"
   | "healthTracker"
   | "resolveProxy"
@@ -465,6 +474,7 @@ export const DEFAULT_OPTIONS: Omit<
   browserPool?: BrowserPoolConfig;
   pool?: IBrowserPool;
   tieredPool?: unknown;
+  playwrightPool?: unknown;
   proxyGate?: unknown;
   healthTracker?: unknown;
   resolveProxy?: (tier: ProxyTier | undefined) => ProxyConfig | undefined;

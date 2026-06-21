@@ -218,7 +218,7 @@ describe("Scraper retry & escalation", () => {
     // Residential timeout should be <= 30s and > 0
     const residentialTimeout = spy.mock.calls[1][3];
     expect(residentialTimeout).toBeGreaterThan(0);
-    expect(residentialTimeout).toBeLessThanOrEqual(30_000);
+    expect(residentialTimeout).toBeLessThanOrEqual(45_000);
   });
 
   // ── rawHtml is always present ──

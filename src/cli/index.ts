@@ -249,6 +249,16 @@ program
       ? new ReaderClient({
           verbose: options.verbose || false,
           showChrome: options.showChrome || false,
+          // When --proxy is passed, add it to the pool so Chrome launches
+          // with --proxy-server. Playwright sets proxy at Chrome launch time.
+          ...(options.proxy
+            ? {
+                proxyPools: {
+                  datacenter: [{ url: options.proxy }],
+                  residential: [{ url: options.proxy }],
+                },
+              }
+            : {}),
         })
       : null;
 
@@ -398,6 +408,14 @@ program
       ? new ReaderClient({
           verbose: options.verbose || false,
           showChrome: options.showChrome || false,
+          ...(options.proxy
+            ? {
+                proxyPools: {
+                  datacenter: [{ url: options.proxy }],
+                  residential: [{ url: options.proxy }],
+                },
+              }
+            : {}),
         })
       : null;
 

@@ -1,8 +1,11 @@
 /**
  * ReaderClient
  *
- * A client wrapper that manages HeroCore lifecycle and provides
+ * A client wrapper that manages browser pool lifecycle and provides
  * a simple interface for scraping and crawling.
+ *
+ * Uses Playwright + direct Chrome spawn (no Hero, no MITM) for scraping.
+ * Browser sessions also use direct Chrome spawn (unchanged).
  *
  * @example
  * const reader = new ReaderClient();
@@ -18,15 +21,11 @@
  * await reader.close();
  */
 
-import HeroCore from "@ulixee/hero-core";
-import { TransportBridge } from "@ulixee/net";
-import { ConnectionToHeroCore } from "@ulixee/hero";
 import { scrape } from "./scraper";
 import { crawl } from "./crawler";
 import { createBrowserSession } from "./browser-session";
 import type { BrowserOptions, BrowserSession } from "./browser-types";
-import { TieredBrowserPool, buildTierConfigsFromPools } from "./browser/tiered-pool";
-import type { HeroFactory } from "./browser/proxy-bound-browser";
+import { PlaywrightPool, buildPlaywrightTierConfigs } from "./browser/playwright-pool";
 import { PerProxyGate } from "./proxy/proxy-gate";
 import { ProxyHealthTracker } from "./proxy/health-tracker";
 import type {
@@ -95,8 +94,7 @@ export interface ReaderClientOptions {
  * scrape/crawl methods with automatic initialization.
  */
 export class ReaderClient {
-  private heroCore: HeroCore | null = null;
-  private tieredPool: TieredBrowserPool | null = null;
+  private pool: PlaywrightPool | null = null;
   private proxyGate: PerProxyGate | null = null;
   private healthTracker: ProxyHealthTracker | null = null;
   private initialized = false;
@@ -109,14 +107,6 @@ export class ReaderClient {
 
   constructor(options: ReaderClientOptions = {}) {
     this.options = options;
-
-    // Configure TLS verification
-    // Hero uses MITM_ALLOW_INSECURE env var to skip certificate verification
-    // Default is true (skip verification) for compatibility with various sites
-    const skipTLS = options.skipTLSVerification ?? true;
-    if (skipTLS) {
-      process.env.MITM_ALLOW_INSECURE = "true";
-    }
 
     // Register cleanup on process exit
     this.registerCleanup();
@@ -228,117 +218,76 @@ export class ReaderClient {
    * Internal initialization logic.
    *
    * Builds (in order):
-   *   1. HeroCore  - shared Hero runtime for every browser in every tier.
-   *   2. PerProxyGate  - scraper-boundary concurrency cap keyed by proxy URL.
-   *   3. ProxyHealthTracker  - 10-strikes-5-min-cooldown circuit breaker.
-   *   4. TieredBrowserPool  - one ProxyBoundBrowser per proxy URL, grouped
-   *      by tier. Pre-warms all browsers in parallel; `pool.ready` awaits
-   *      every browser's initial launch attempt (success or failure).
+   *   1. PerProxyGate  - scraper-boundary concurrency cap keyed by proxy URL.
+   *   2. ProxyHealthTracker  - 10-strikes-5-min-cooldown circuit breaker.
+   *   3. PlaywrightPool  - one Chrome process per proxy URL, connected via
+   *      Playwright CDP. Pre-warms all browsers in parallel.
    *
-   * `this.options.browserPool?.directPoolSize` controls how many direct
-   * browsers to spin up when no proxies are configured (local dev, CI).
+   * No HeroCore needed — each Chrome instance is spawned directly via
+   * child_process.spawn, and Playwright connects via CDP.
    */
   private async initializeCore(): Promise<void> {
     try {
       if (this.options.verbose) {
-        logger.info("Starting HeroCore...");
-      }
-
-      this.heroCore = new HeroCore();
-      await this.heroCore.start();
-
-      if (this.options.verbose) {
-        logger.info("HeroCore started successfully");
+        logger.info("Initializing Playwright pool...");
       }
 
       // Build the scraper-level primitives.
       this.proxyGate = new PerProxyGate({
-        maxConcurrentPerProxy: 2, // default; domain profiles can tighten
+        maxConcurrentPerProxy: 2,
       });
       this.healthTracker = new ProxyHealthTracker();
 
-      // Build the tiered browser pool from the configured proxy pools.
-      const tierConfigs = buildTierConfigsFromPools(this.options.proxyPools, {
+      // Build the pool from the configured proxy pools.
+      const tierConfigs = buildPlaywrightTierConfigs(this.options.proxyPools, {
         directPoolSize: this.options.browserPool?.size ?? 1,
       });
 
       if (this.options.verbose) {
         const summary = tierConfigs.map((t) => `${t.tier}:${t.proxyUrls.length}`).join(" ");
-        logger.info(`Initializing tiered browser pool (${summary})`);
+        logger.info(`Initializing Playwright pool (${summary})`);
       }
 
-      this.tieredPool = new TieredBrowserPool({
+      this.pool = new PlaywrightPool({
         tiers: tierConfigs,
         maxTabsPerBrowser: 2,
         retireAfterPages: this.options.browserPool?.retireAfterPages ?? 100,
-        healthTracker: this.healthTracker,
-        heroFactory: undefined as HeroFactory | undefined, // use real factory
         showChrome: this.options.showChrome,
-        connectionToCore: this.createConnection(),
         userAgent: this.options.userAgent,
+        healthTracker: this.healthTracker,
         logger,
       });
 
-      // Pre-warm: await every browser's initial launch attempt. Per-browser
-      // failures are already logged and swallowed; they don't block the
-      // pool's ready promise. The separate startup api.ipify.org check
-      // (added in a later item) will fail loud if any proxy is dead.
-      await this.tieredPool.ready;
+      await this.pool.ready;
 
       this.initialized = true;
 
       if (this.options.verbose) {
-        const stats = this.tieredPool.getStats();
+        const stats = this.pool.getStats();
         const counts = stats.tiers.map((t) => `${t.tier}=${t.browsers.length}`).join(" ");
-        logger.info(`Browser pool initialized (${counts})`);
+        logger.info(`Playwright pool initialized (${counts})`);
       }
     } catch (error: any) {
       // Clean up on failure
-      if (this.tieredPool) {
-        await this.tieredPool.close().catch(() => {});
-        this.tieredPool = null;
+      if (this.pool) {
+        await this.pool.close().catch(() => {});
+        this.pool = null;
       }
       this.proxyGate = null;
       this.healthTracker = null;
-      if (this.heroCore) {
-        await this.heroCore.close().catch(() => {});
-        this.heroCore = null;
-      }
       this.initialized = false;
 
-      // Provide helpful error messages
       const message = error.message || String(error);
-
-      if (message.includes("EADDRINUSE")) {
-        throw new Error(
-          "Failed to start HeroCore: Port already in use. " +
-            "Another instance may be running. " +
-            "Close it or use a different port."
-        );
-      }
 
       if (message.includes("chrome") || message.includes("Chrome")) {
         throw new Error(
-          "Failed to start HeroCore: Chrome/Chromium not found. " +
-            "Please install Chrome or set CHROME_PATH environment variable."
+          "Failed to initialize: Chrome/Chromium not found. " +
+            "Please install Chrome or set CHROME_139_BIN environment variable."
         );
       }
 
-      throw new Error(`Failed to start HeroCore: ${message}`);
+      throw new Error(`Failed to initialize Playwright pool: ${message}`);
     }
-  }
-
-  /**
-   * Create a connection to the HeroCore instance
-   */
-  private createConnection(): ConnectionToHeroCore {
-    if (!this.heroCore) {
-      throw new Error("HeroCore not initialized. This should not happen.");
-    }
-
-    const bridge = new TransportBridge();
-    this.heroCore.addConnection(bridge.transportToClient);
-    return new ConnectionToHeroCore(bridge.transportToCore);
   }
 
   /**
@@ -369,21 +318,18 @@ export class ReaderClient {
   async scrape(options: Omit<ScrapeOptions, "connectionToCore" | "pool">): Promise<ScrapeResult> {
     await this.ensureInitialized();
 
-    if (!this.tieredPool) {
+    if (!this.pool) {
       throw new Error("Browser pool not initialized. This should not happen.");
     }
 
-    // Bind `resolveProxy` to `this` so the scraper can call it per-attempt
-    // without losing the client context.
     const boundResolveProxy = (tier: ProxyTier | undefined) => this.resolveProxy(tier);
 
     return await scrape({
       ...options,
-      // Caller may still pass an explicit proxy to opt out of tier routing.
       proxy: options.proxy,
       showChrome: options.showChrome ?? this.options.showChrome,
       verbose: options.verbose ?? this.options.verbose,
-      tieredPool: this.tieredPool,
+      playwrightPool: this.pool,
       proxyGate: this.proxyGate ?? undefined,
       healthTracker: this.healthTracker ?? undefined,
       resolveProxy: boundResolveProxy,
@@ -407,7 +353,7 @@ export class ReaderClient {
   async crawl(options: Omit<CrawlOptions, "connectionToCore" | "pool">): Promise<CrawlResult> {
     await this.ensureInitialized();
 
-    if (!this.tieredPool) {
+    if (!this.pool) {
       throw new Error("Browser pool not initialized. This should not happen.");
     }
 
@@ -416,7 +362,7 @@ export class ReaderClient {
     return await crawl({
       ...options,
       proxy: options.proxy,
-      tieredPool: this.tieredPool,
+      playwrightPool: this.pool,
       proxyGate: this.proxyGate ?? undefined,
       healthTracker: this.healthTracker ?? undefined,
       resolveProxy: boundResolveProxy,
@@ -511,45 +457,25 @@ export class ReaderClient {
       this.activeSessions.clear();
     }
 
-    // Shutdown the tiered pool first (closes every browser in every tier)
-    if (this.tieredPool) {
+    // Shutdown the Playwright pool (closes every Chrome in every tier)
+    if (this.pool) {
       if (this.options.verbose) {
-        logger.info("Shutting down tiered browser pool...");
+        logger.info("Shutting down Playwright pool...");
       }
 
       try {
-        await this.tieredPool.close();
+        await this.pool.close();
       } catch (error: any) {
         if (this.options.verbose) {
           logger.warn(`Error shutting down pool: ${error.message}`);
         }
       }
 
-      this.tieredPool = null;
+      this.pool = null;
     }
 
     this.proxyGate = null;
     this.healthTracker = null;
-
-    // Then close HeroCore
-    if (this.heroCore) {
-      if (this.options.verbose) {
-        logger.info("Closing HeroCore...");
-      }
-
-      try {
-        await this.heroCore.close();
-        // Also call static shutdown to clean up any remaining resources
-        await HeroCore.shutdown();
-      } catch (error: any) {
-        // Ignore close errors
-        if (this.options.verbose) {
-          logger.warn(`Error closing HeroCore: ${error.message}`);
-        }
-      }
-
-      this.heroCore = null;
-    }
 
     this.initialized = false;
 
