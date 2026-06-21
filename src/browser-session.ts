@@ -266,7 +266,8 @@ export async function createBrowserSession(
     "--disable-blink-features=AutomationControlled",
   ];
 
-  if (!options.showChrome) {
+  const hasDisplay = !!process.env.DISPLAY;
+  if (!options.showChrome && !hasDisplay) {
     args.push("--headless=new");
   }
 
