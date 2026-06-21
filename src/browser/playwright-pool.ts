@@ -426,7 +426,11 @@ export class ChromeInstance {
         "--ignore-certificate-errors",
       ];
 
-      if (!this.showChrome) {
+      // Run headless unless showChrome is true OR a virtual display (xvfb)
+      // is available. Non-headless Chrome bypasses Cloudflare Turnstile
+      // detection that blocks both headless modes.
+      const hasDisplay = !!process.env.DISPLAY;
+      if (!this.showChrome && !hasDisplay) {
         args.push("--headless=new");
       }
 
