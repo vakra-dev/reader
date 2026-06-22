@@ -386,6 +386,7 @@ export class Scraper {
       }
 
       const htmlOutput = this.options.formats.includes("html") ? cleanedHtml : undefined;
+      const screenshotOutput = engineResult.screenshot;
 
       // Report progress
       if (this.options.onProgress) {
@@ -429,6 +430,7 @@ export class Scraper {
         rawHtml: engineResult.html,
         markdown,
         html: htmlOutput,
+        screenshot: screenshotOutput,
         metadata: {
           baseUrl: url,
           ...(finalUrl ? { finalUrl } : {}),

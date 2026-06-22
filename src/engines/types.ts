@@ -29,6 +29,9 @@ export interface EngineResult {
   /** Response headers */
   headers?: Record<string, string>;
 
+  /** Screenshot as base64-encoded PNG, only present when requested */
+  screenshot?: string;
+
   /** Engine that produced this result */
   engine: EngineName;
   /** Time taken in milliseconds */

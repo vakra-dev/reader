@@ -250,7 +250,7 @@ export class ReaderClient {
 
       this.pool = new PlaywrightPool({
         tiers: tierConfigs,
-        maxTabsPerBrowser: 2,
+        maxTabsPerBrowser: 10,
         retireAfterPages: this.options.browserPool?.retireAfterPages ?? 100,
         showChrome: this.options.showChrome,
         userAgent: this.options.userAgent,

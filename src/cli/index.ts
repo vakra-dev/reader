@@ -266,7 +266,7 @@ program
       const formats = options.format.split(",").map((f: string) => f.trim());
 
       // Validate formats
-      const validFormats = ["markdown", "html"];
+      const validFormats = ["markdown", "html", "screenshot"];
       for (const format of formats) {
         if (!validFormats.includes(format)) {
           console.error(

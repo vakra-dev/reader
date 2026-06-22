@@ -77,7 +77,7 @@ export interface ScrapeOptions {
   urls: string[];
 
   /** Output formats - which content fields to include (default: ['markdown']) */
-  formats?: Array<"markdown" | "html">;
+  formats?: Array<"markdown" | "html" | "screenshot">;
 
   /** Custom user agent string (overrides Hero's default emulated UA) */
   userAgent?: string;
@@ -352,6 +352,9 @@ export interface WebsiteScrapeResult {
   /** Cleaned HTML content (present if 'html' in formats) */
   html?: string;
 
+  /** Screenshot as base64-encoded PNG (present if 'screenshot' in formats) */
+  screenshot?: string;
+
   /** Metadata about the scraping operation */
   metadata: {
     /** Base URL that was scraped */
@@ -506,8 +509,8 @@ export const DEFAULT_OPTIONS: Omit<
 /**
  * Format type guard
  */
-export function isValidFormat(format: string): format is "markdown" | "html" {
-  return format === "markdown" || format === "html";
+export function isValidFormat(format: string): format is "markdown" | "html" | "screenshot" {
+  return format === "markdown" || format === "html" || format === "screenshot";
 }
 
 /**

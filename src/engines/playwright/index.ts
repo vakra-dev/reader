@@ -212,6 +212,14 @@ export class PlaywrightEngine implements Engine {
       );
     }
 
+    // Capture screenshot if requested (must happen before page closes)
+    let screenshot: string | undefined;
+    if (options.formats?.includes("screenshot")) {
+      const buffer = await page.screenshot({ type: "png", fullPage: true });
+      screenshot = buffer.toString("base64");
+      logger?.debug(`[playwright] Screenshot captured: ${buffer.length} bytes`);
+    }
+
     const duration = Date.now() - startTime;
     logger?.debug(`[playwright] Success: ${html.length} chars in ${duration}ms`);
 
@@ -219,6 +227,7 @@ export class PlaywrightEngine implements Engine {
       html,
       url: finalUrl,
       statusCode,
+      screenshot,
       engine: "playwright" as EngineName,
       duration,
     };
