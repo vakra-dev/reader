@@ -1,0 +1,15 @@
+.env
+.env.*
+node_modules
+src
+tests
+examples
+docs
+deploy
+.git
+*.md
+tsconfig.json
+tsup.config.ts
+vitest.config.ts
+.eslintrc*
+.prettierrc*
