@@ -38,7 +38,6 @@ npm install bullmq ioredis @vakra-dev/reader
 ```typescript
 // queue.ts
 import { Queue, Worker, Job } from "bullmq";
-import { scrape } from "@vakra-dev/reader";
 
 const connection = {
   host: process.env.REDIS_HOST || "localhost",
@@ -74,24 +73,20 @@ export async function enqueueScrape(data: ScrapeJobData) {
 ```typescript
 // worker.ts
 import { Worker, Job } from "bullmq";
-import HeroCore from "@ulixee/hero-core";
-import { TransportBridge } from "@ulixee/net";
-import { ConnectionToHeroCore } from "@ulixee/hero";
-import { scrape } from "@vakra-dev/reader";
+import { ReaderClient } from "@vakra-dev/reader";
 
 const connection = {
   host: process.env.REDIS_HOST || "localhost",
   port: parseInt(process.env.REDIS_PORT || "6379"),
 };
 
-// Shared Hero Core
-let heroCore: HeroCore;
-
-async function createConnection() {
-  const bridge = new TransportBridge();
-  heroCore.addConnection(bridge.transportToClient);
-  return new ConnectionToHeroCore(bridge.transportToCore);
-}
+// Shared ReaderClient - browser pool reused across all jobs
+const reader = new ReaderClient({
+  browserPool: {
+    size: 5,
+    retireAfterPages: 100,
+  },
+});
 
 // Process jobs
 const worker = new Worker(
@@ -101,10 +96,9 @@ const worker = new Worker(
 
     console.log(`Processing job ${job.id}: ${urls.length} URLs`);
 
-    const result = await scrape({
+    const result = await reader.scrape({
       urls,
       formats,
-      connectionToCore: await createConnection(),
       onProgress: async ({ completed, total }) => {
         await job.updateProgress((completed / total) * 100);
       },
@@ -138,8 +132,6 @@ worker.on("failed", (job, err) => {
 
 // Start worker
 async function start() {
-  heroCore = new HeroCore();
-  await heroCore.start();
   console.log("Worker started, waiting for jobs...");
 }
 
@@ -147,7 +139,7 @@ async function start() {
 async function shutdown() {
   console.log("Shutting down worker...");
   await worker.close();
-  if (heroCore) await heroCore.close();
+  await reader.close();
   process.exit(0);
 }
 
@@ -375,7 +367,7 @@ const worker = new Worker(
   "scrape",
   async (job) => {
     try {
-      return await scrape(job.data);
+      return await reader.scrape(job.data);
     } catch (error) {
       // Don't retry on certain errors
       if (error.message.includes("Invalid URL")) {
@@ -424,8 +416,7 @@ for (const job of failedJobs) {
 // complete-example.ts
 import { Queue, Worker, Job } from "bullmq";
 import express from "express";
-import HeroCore from "@ulixee/hero-core";
-import { scrape, ScrapeResult } from "@vakra-dev/reader";
+import { ReaderClient, ScrapeResult } from "@vakra-dev/reader";
 
 const app = express();
 app.use(express.json());
@@ -436,18 +427,16 @@ const connection = { host: "localhost", port: 6379 };
 // Queue
 const scrapeQueue = new Queue("scrape", { connection });
 
-// Shared Hero Core
-let heroCore: HeroCore;
+// Shared ReaderClient
+const reader = new ReaderClient({
+  browserPool: { size: 5 },
+});
 
 // Worker
 const worker = new Worker<any, ScrapeResult>(
   "scrape",
   async (job: Job) => {
-    const result = await scrape({
-      ...job.data,
-      connectionToCore: await createConnection(),
-    });
-    return result;
+    return await reader.scrape(job.data);
   },
   { connection, concurrency: 3 }
 );
@@ -472,9 +461,6 @@ app.get("/scrape/:jobId", async (req, res) => {
 
 // Start
 async function start() {
-  heroCore = new HeroCore();
-  await heroCore.start();
-
   app.listen(3000, () => console.log("Server running"));
 }
 

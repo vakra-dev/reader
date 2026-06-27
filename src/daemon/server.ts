@@ -31,7 +31,7 @@ import type { BrowserOptions, BrowserSession } from "../browser-types";
 import { createLogger } from "../utils/logger";
 import { parseProxyPoolsFromEnv } from "../proxy/env";
 import { verifyProxiesOrThrow } from "../proxy/verify";
-import { redactProxyUrl } from "../browser/proxy-bound-browser";
+import { redactProxyUrl } from "../proxy/config";
 
 const logger = createLogger("daemon");
 
@@ -60,12 +60,12 @@ export interface DaemonServerOptions {
  */
 interface ScrapeRequest {
   action: "scrape";
-  options: Omit<ScrapeOptions, "connectionToCore">;
+  options: ScrapeOptions;
 }
 
 interface CrawlRequest {
   action: "crawl";
-  options: Omit<CrawlOptions, "connectionToCore">;
+  options: CrawlOptions;
 }
 
 interface StatusRequest {
@@ -78,7 +78,7 @@ interface ShutdownRequest {
 
 interface BrowserCreateRequest {
   action: "browser.create";
-  options: Omit<BrowserOptions, "connectionToCore">;
+  options: BrowserOptions;
 }
 
 interface BrowserStopRequest {
@@ -110,6 +110,7 @@ interface SuccessResponse<T> {
 interface ErrorResponse {
   success: false;
   error: string;
+  code?: string;
 }
 
 type DaemonResponse<T> = SuccessResponse<T> | ErrorResponse;
@@ -166,7 +167,7 @@ export class DaemonServer {
       throw new Error("Daemon is already running");
     }
 
-    // Load proxy pools from PROXY_DATACENTER / PROXY_RESIDENTIAL env vars.
+    // Load proxy pools from PROXY_STANDARD / PROXY_PREMIUM env vars.
     // Throws on malformed URLs — we refuse to start with a bad proxy config
     // rather than silently falling through to direct connections, which
     // would hide the misconfiguration behind partial successes.
@@ -375,7 +376,11 @@ export class DaemonServer {
           this.sendResponse(res, 400, { success: false, error: "Unknown action" });
       }
     } catch (error: any) {
-      this.sendResponse(res, 500, { success: false, error: error.message });
+      this.sendResponse(res, 500, {
+        success: false,
+        error: error.message,
+        code: error.code ?? "UNKNOWN",
+      });
     } finally {
       this.activeRequests--;
     }
@@ -384,10 +389,7 @@ export class DaemonServer {
   /**
    * Handle scrape request
    */
-  private async handleScrape(
-    res: http.ServerResponse,
-    options: Omit<ScrapeOptions, "connectionToCore">
-  ): Promise<void> {
+  private async handleScrape(res: http.ServerResponse, options: ScrapeOptions): Promise<void> {
     if (!this.client) {
       this.sendResponse(res, 500, { success: false, error: "Client not initialized" });
       return;
@@ -400,10 +402,7 @@ export class DaemonServer {
   /**
    * Handle crawl request
    */
-  private async handleCrawl(
-    res: http.ServerResponse,
-    options: Omit<CrawlOptions, "connectionToCore">
-  ): Promise<void> {
+  private async handleCrawl(res: http.ServerResponse, options: CrawlOptions): Promise<void> {
     if (!this.client) {
       this.sendResponse(res, 500, { success: false, error: "Client not initialized" });
       return;
@@ -487,7 +486,7 @@ export class DaemonServer {
    */
   private async handleBrowserCreate(
     res: http.ServerResponse,
-    options: Omit<BrowserOptions, "connectionToCore">
+    options: BrowserOptions
   ): Promise<void> {
     if (!this.client) {
       this.sendResponse(res, 500, { success: false, error: "Client not initialized" });

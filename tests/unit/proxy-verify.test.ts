@@ -32,28 +32,28 @@ describe("verifyProxies", () => {
     expect(result.failed).toEqual([]);
   });
 
-  it("verifies a single datacenter proxy and returns its egress IP", async () => {
+  it("verifies a single standard proxy and returns its egress IP", async () => {
     const fetcher = makeFakeFetcher({ "http://dc1": "1.2.3.4" });
     const result = await verifyProxies(
-      { datacenter: [{ url: "http://dc1" }] },
+      { standard: [{ url: "http://dc1" }] },
       { fetcher },
     );
     expect(result.failed).toEqual([]);
     expect(result.verified).toEqual([
-      { proxyUrl: "http://dc1", egressIp: "1.2.3.4", tier: "datacenter" },
+      { proxyUrl: "http://dc1", egressIp: "1.2.3.4", tier: "standard" },
     ]);
   });
 
-  it("tags residential proxies with the right tier", async () => {
+  it("tags premium proxies with the right tier", async () => {
     const fetcher = makeFakeFetcher({ "http://res1": "5.6.7.8" });
     const result = await verifyProxies(
-      { residential: [{ url: "http://res1" }] },
+      { premium: [{ url: "http://res1" }] },
       { fetcher },
     );
-    expect(result.verified[0]).toMatchObject({ tier: "residential" });
+    expect(result.verified[0]).toMatchObject({ tier: "premium" });
   });
 
-  it("verifies datacenter and residential pools together", async () => {
+  it("verifies standard and premium pools together", async () => {
     const fetcher = makeFakeFetcher({
       "http://dc1": "1.1.1.1",
       "http://dc2": "2.2.2.2",
@@ -61,15 +61,15 @@ describe("verifyProxies", () => {
     });
     const result = await verifyProxies(
       {
-        datacenter: [{ url: "http://dc1" }, { url: "http://dc2" }],
-        residential: [{ url: "http://res1" }],
+        standard: [{ url: "http://dc1" }, { url: "http://dc2" }],
+        premium: [{ url: "http://res1" }],
       },
       { fetcher },
     );
     expect(result.failed).toEqual([]);
     expect(result.verified).toHaveLength(3);
     const tiers = result.verified.map((v) => v.tier).sort();
-    expect(tiers).toEqual(["datacenter", "datacenter", "residential"]);
+    expect(tiers).toEqual(["premium", "standard", "standard"]);
   });
 
   it("collects failures alongside successes", async () => {
@@ -80,21 +80,21 @@ describe("verifyProxies", () => {
     });
     const result = await verifyProxies(
       {
-        datacenter: [{ url: "http://dc1" }, { url: "http://dc2" }],
-        residential: [{ url: "http://res1" }],
+        standard: [{ url: "http://dc1" }, { url: "http://dc2" }],
+        premium: [{ url: "http://res1" }],
       },
       { fetcher },
     );
     expect(result.verified).toHaveLength(2);
     expect(result.failed).toEqual([
-      { proxyUrl: "http://dc2", tier: "datacenter", error: "connection refused" },
+      { proxyUrl: "http://dc2", tier: "standard", error: "connection refused" },
     ]);
   });
 
   it("ignores entries without a URL", async () => {
     const fetcher = makeFakeFetcher({ "http://dc1": "1.1.1.1" });
     const result = await verifyProxies(
-      { datacenter: [{ url: "http://dc1" }, {}, { url: "" }] },
+      { standard: [{ url: "http://dc1" }, {}, { url: "" }] },
       { fetcher },
     );
     expect(result.verified).toHaveLength(1);
@@ -106,7 +106,7 @@ describe("verifyProxiesOrThrow", () => {
   it("returns the verified list when everything succeeds", async () => {
     const fetcher = makeFakeFetcher({ "http://dc1": "1.1.1.1" });
     const verified = await verifyProxiesOrThrow(
-      { datacenter: [{ url: "http://dc1" }] },
+      { standard: [{ url: "http://dc1" }] },
       { fetcher },
     );
     expect(verified).toHaveLength(1);
@@ -121,8 +121,8 @@ describe("verifyProxiesOrThrow", () => {
     await expect(
       verifyProxiesOrThrow(
         {
-          datacenter: [{ url: "http://dc1" }],
-          residential: [{ url: "http://res1" }],
+          standard: [{ url: "http://dc1" }],
+          premium: [{ url: "http://res1" }],
         },
         { fetcher },
       ),
@@ -136,7 +136,7 @@ describe("verifyProxiesOrThrow", () => {
     let captured: string = "";
     try {
       await verifyProxiesOrThrow(
-        { datacenter: [{ url: "http://user:secret@dc1.example.com:8080" }] },
+        { standard: [{ url: "http://user:secret@dc1.example.com:8080" }] },
         { fetcher },
       );
     } catch (e: unknown) {

@@ -76,6 +76,20 @@ export class EngineTimeoutError extends EngineError {
 }
 
 /**
+ * Page is blocked (challenge page, access denied, bot detection).
+ * Retryable by default -- triggers proxy tier escalation in the scraper.
+ */
+export class EngineBlockedError extends EngineError {
+  readonly blockReason: string;
+
+  constructor(engine: EngineName, blockReason: string) {
+    super(engine, `Blocked: ${blockReason}`, { retryable: true });
+    this.name = "EngineBlockedError";
+    this.blockReason = blockReason;
+  }
+}
+
+/**
  * Engine not available (not configured, missing dependency)
  */
 export class EngineUnavailableError extends EngineError {

@@ -69,22 +69,9 @@ export {
 export { rateLimit } from "./utils/rate-limiter";
 
 // =============================================================================
-// Browser pool exports (for advanced usage)
-// =============================================================================
-export { BrowserPool, HeroBrowserPool } from "./browser/pool";
-export { createHeroConfig } from "./browser/hero-config";
-export type {
-  IBrowserPool,
-  PoolConfig,
-  BrowserInstance,
-  PoolStats,
-  HealthStatus,
-} from "./browser/types";
-
-// =============================================================================
 // Proxy exports (for advanced usage)
 // =============================================================================
-export { createProxyUrl, parseProxyUrl } from "./proxy/config";
+export { createProxyUrl, parseProxyUrl, redactProxyUrl } from "./proxy/config";
 
 // =============================================================================
 // Default options export

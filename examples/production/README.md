@@ -9,7 +9,7 @@ Production-ready setups for running Reader at scale.
 A full-featured REST API server with:
 - Health checks and graceful shutdown
 - Scrape and crawl endpoints
-- Shared Hero Core for efficiency
+- Shared browser pool for efficiency
 - Request validation and error handling
 
 ### [Job Queue (BullMQ)](./job-queue-bullmq/)
@@ -30,7 +30,7 @@ Advanced browser pool management:
 
 ## Best Practices
 
-1. **Use a Shared Core**: Initialize Hero Core once and share across requests
+1. **Use a Shared Browser Pool**: Initialize ReaderClient once and share across requests
 2. **Implement Health Checks**: Monitor browser pool health
 3. **Add Rate Limiting**: Protect against abuse
 4. **Use Caching**: Cache scrape results (Redis, Memcached)

@@ -49,7 +49,7 @@ export class DaemonClient {
   /**
    * Scrape URLs via daemon
    */
-  async scrape(options: Omit<ScrapeOptions, "connectionToCore">): Promise<ScrapeResult> {
+  async scrape(options: ScrapeOptions): Promise<ScrapeResult> {
     return this.request<ScrapeResult>({
       action: "scrape",
       options,
@@ -59,7 +59,7 @@ export class DaemonClient {
   /**
    * Crawl URL via daemon
    */
-  async crawl(options: Omit<CrawlOptions, "connectionToCore">): Promise<CrawlResult> {
+  async crawl(options: CrawlOptions): Promise<CrawlResult> {
     return this.request<CrawlResult>({
       action: "crawl",
       options,
@@ -87,9 +87,7 @@ export class DaemonClient {
   /**
    * Create a browser session via daemon
    */
-  async browserCreate(
-    options: Omit<BrowserOptions, "connectionToCore"> = {}
-  ): Promise<BrowserSessionInfo> {
+  async browserCreate(options: BrowserOptions = {}): Promise<BrowserSessionInfo> {
     return this.request<BrowserSessionInfo>({
       action: "browser.create",
       options,

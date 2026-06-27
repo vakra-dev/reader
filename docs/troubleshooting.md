@@ -26,14 +26,13 @@ node --version
 Error: Could not find Chrome installation
 ```
 
-**Cause:** Hero needs Chrome/Chromium to run. It tries to download it automatically on first run.
+**Cause:** Playwright needs Chrome/Chromium to run. It downloads Chromium automatically on first install.
 
 **Solutions:**
 
-1. **Let Hero download Chrome:**
+1. **Install Playwright's bundled Chromium:**
    ```bash
-   # Clear any cached downloads and try again
-   rm -rf ~/.cache/ulixee
+   npx playwright install chromium
    npx reader scrape https://example.com
    ```
 
@@ -62,7 +61,7 @@ Error: Could not find Chrome installation
 Error: connect ECONNREFUSED 127.0.0.1:9222
 ```
 
-**Cause:** Hero couldn't start or connect to Chrome.
+**Cause:** Playwright couldn't start or connect to Chrome.
 
 **Solutions:**
 
@@ -140,7 +139,7 @@ Error: Access denied (Error code 1020)
    const result = await reader.scrape({
      urls: ["https://example.com"],
      proxy: {
-       type: "residential",
+       type: "premium",
        host: "proxy.example.com",
        port: 8080,
        username: "username",
@@ -249,25 +248,6 @@ SyntaxError: Cannot use import statement outside a module
    main();
    ```
 
-### "Bun runtime not supported"
-
-**Error:**
-```
-Error: Hero doesn't work with Bun runtime
-```
-
-**Cause:** Hero requires Node.js runtime and is not compatible with Bun.
-
-**Solution:** Use Node.js to run your scripts:
-
-```bash
-# Use npx tsx
-npx tsx script.ts
-
-# or node with loader
-node --loader tsx script.ts
-```
-
 ## Debugging Tips
 
 ### Enable Verbose Logging
@@ -346,7 +326,7 @@ await reader.close();
    await pool.shutdown();
    ```
 
-3. **Use shared Hero Core for production:**
+3. **Use a shared browser pool for production:**
    See [Production Server Guide](deployment/production-server.md)
 
 ### High Memory Usage

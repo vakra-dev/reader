@@ -32,7 +32,7 @@ const reader = new ReaderClient();
 const result = await reader.scrape({
   urls: ["https://example.com"],
   proxy: {
-    type: "residential",
+    type: "premium",
     host: "proxy.example.com",
     port: 8080,
     username: "username",
@@ -59,7 +59,7 @@ npx reader scrape https://example.com --proxy http://user:pass@host:port
 
 ```typescript
 proxy: {
-  type: "datacenter",
+  type: "standard",
   host: "proxy.example.com",
   port: 8080,
   username: "username",
@@ -75,7 +75,7 @@ proxy: {
 
 ```typescript
 proxy: {
-  type: "residential",
+  type: "premium",
   host: "proxy.example.com",
   port: 8080,
   username: "username",
@@ -95,7 +95,7 @@ proxy: {
 | Option | Type | Description |
 |--------|------|-------------|
 | `url` | `string` | Full proxy URL (takes precedence) |
-| `type` | `"datacenter" \| "residential"` | Proxy type |
+| `type` | `"standard" \| "premium"` | Proxy type |
 | `host` | `string` | Proxy server hostname |
 | `port` | `number` | Proxy server port |
 | `username` | `string` | Authentication username |
@@ -108,7 +108,7 @@ proxy: {
 
 ```typescript
 proxy: {
-  type: "residential",
+  type: "premium",
   host: "geo.iproyal.com",
   port: 12321,
   username: "customer-username",
@@ -121,7 +121,7 @@ proxy: {
 
 ```typescript
 proxy: {
-  type: "residential",
+  type: "premium",
   host: "brd.superproxy.io",
   port: 22225,
   username: "customer-zone-residential",
@@ -134,7 +134,7 @@ proxy: {
 
 ```typescript
 proxy: {
-  type: "residential",
+  type: "premium",
   host: "pr.oxylabs.io",
   port: 7777,
   username: "customer-username",
@@ -147,7 +147,7 @@ proxy: {
 
 ```typescript
 proxy: {
-  type: "residential",
+  type: "premium",
   host: "gate.smartproxy.com",
   port: 7000,
   username: "user",
@@ -199,16 +199,16 @@ interface ProxyMetadata {
 
 ## Tiered Proxy Pools (Recommended)
 
-Instead of a flat proxy list, configure separate datacenter and residential pools. Reader auto-escalates from datacenter to residential when a site blocks:
+Configure separate standard and premium proxy pools:
 
 ```typescript
 const reader = new ReaderClient({
   proxyPools: {
-    datacenter: [
+    standard: [
       { url: "http://user:pass@dc-proxy1:8080" },
       { url: "http://user:pass@dc-proxy2:8080" },
     ],
-    residential: [
+    premium: [
       { url: "http://user:pass@res-proxy1:8080" },
     ],
   },
@@ -216,7 +216,7 @@ const reader = new ReaderClient({
 
 const result = await reader.scrape({
   urls: ["https://example.com"],
-  proxyTier: "auto", // datacenter first, escalate to residential on block
+  proxyMode: "standard", // or "premium" for anti-bot sites
 });
 ```
 
@@ -224,17 +224,17 @@ const result = await reader.scrape({
 
 | Tier | When used | Credits |
 |------|-----------|---------|
-| `"datacenter"` | Fast, most sites | 1 per scrape |
-| `"residential"` | Anti-bot sites (Amazon, LinkedIn) | 3 per scrape |
-| `"auto"` | Starts datacenter, escalates on block | 1 or 3 |
+| `"standard"` | Fast, most sites | 1 per scrape |
+| `"premium"` | Anti-bot sites (Amazon, LinkedIn) | 3 per scrape |
+
 
 ### Environment Variables
 
 Configure proxy pools via environment variables (useful for daemons):
 
 ```bash
-PROXY_DATACENTER=http://user:pass@dc1:8080,http://user:pass@dc2:8080
-PROXY_RESIDENTIAL=http://user:pass@res1:8080
+PROXY_STANDARD=http://user:pass@dc1:8080,http://user:pass@dc2:8080
+PROXY_PREMIUM=http://user:pass@res1:8080
 ```
 
 ### Health Tracking
@@ -430,8 +430,8 @@ await reader.close();
 
 ## Best Practices
 
-1. **Start with datacenter proxies** - Cheaper, see if you need more
-2. **Upgrade to residential** - When blocked or for Cloudflare sites
+1. **Start with standard proxies** - Cheaper, works for most sites
+2. **Use premium (residential)** - When blocked or for Cloudflare-protected sites
 3. **Use geo-targeting** - Match target site's expected users
 4. **Implement rotation** - Spread requests across IPs
 5. **Handle failures gracefully** - Have fallback proxies

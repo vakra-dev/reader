@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Chrome path for Hero
+# Set Chrome path
 ENV CHROME_PATH=/usr/bin/chromium
 
 WORKDIR /app
@@ -266,13 +266,13 @@ Chrome requires special configuration in Docker:
 ENV CHROME_FLAGS="--no-sandbox --disable-setuid-sandbox"
 ```
 
-Or configure in Hero:
+Or configure in code:
 
 ```typescript
 // In your application
 const pool = new BrowserPool({
-  heroOptions: {
-    noChromeSandbox: true,
+  launchOptions: {
+    args: ["--no-sandbox"],
   },
 });
 ```

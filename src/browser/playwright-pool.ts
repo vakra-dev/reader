@@ -1,7 +1,7 @@
 /**
  * PlaywrightPool — Chrome process management with Playwright CDP connections.
  *
- * Replaces HeroCore + TieredBrowserPool + ProxyBoundBrowser for scraping.
+ * Chrome process management replacing the legacy tiered browser pool.
  * Each proxy URL gets its own Chrome process, launched directly via
  * child_process.spawn (same pattern as browser-session.ts). Playwright
  * connects via CDP to drive pages.
@@ -20,163 +20,25 @@
 
 import { spawn, type ChildProcess } from "child_process";
 import { createInterface } from "readline";
-import { createServer, type Server } from "http";
-import net from "net";
-import { mkdtempSync, rmSync, accessSync } from "fs";
+import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { createRequire } from "module";
 import pLimit from "p-limit";
+import { anonymizeProxy, closeAnonymizedProxy } from "proxy-chain";
+import { FingerprintGenerator, type BrowserFingerprintWithHeaders } from "fingerprint-generator";
+import { FingerprintInjector } from "fingerprint-injector";
 import { createLogger, type Logger } from "../utils/logger.js";
 import type { ProxyHealthTracker } from "../proxy/health-tracker.js";
+import { findChromePath, buildChromeArgs, CHROME_LAUNCH_TIMEOUT_MS } from "./shared.js";
 
 // Lazy-loaded Playwright types — we import dynamically to avoid hard dep at parse time.
 type PlaywrightBrowser = import("playwright-core").Browser;
 type PlaywrightBrowserContext = import("playwright-core").BrowserContext;
 type PlaywrightPage = import("playwright-core").Page;
 
-const CHROME_LAUNCH_TIMEOUT_MS = 15_000;
-
-// ─── Chrome path resolution ────────────────────────────────────────
-
-function findChromePath(): string {
-  if (process.env.CHROME_139_BIN) {
-    return process.env.CHROME_139_BIN;
-  }
-
-  try {
-    const req = createRequire(import.meta.url);
-    const ChromeEngine = req("@ulixee/chrome-139-0");
-    const chrome = new ChromeEngine();
-    if (chrome.executablePath) return chrome.executablePath;
-  } catch {
-    // Not available
-  }
-
-  if (process.platform === "darwin") {
-    return "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-  }
-  if (process.platform === "linux") {
-    for (const p of [
-      "/usr/bin/google-chrome-stable",
-      "/usr/bin/google-chrome",
-      "/usr/bin/chromium-browser",
-      "/usr/bin/chromium",
-    ]) {
-      try {
-        accessSync(p);
-        return p;
-      } catch {
-        /* continue */
-      }
-    }
-  }
-  return "google-chrome";
-}
-
-// ─── Auth proxy forwarder (reused from browser-session.ts) ─────────
-
-function startAuthProxy(
-  upstreamHost: string,
-  upstreamPort: number,
-  username: string,
-  password: string
-): Promise<{ server: Server; port: number }> {
-  return new Promise((resolve, reject) => {
-    const authHeader = "Basic " + Buffer.from(`${username}:${password}`).toString("base64");
-
-    const server = createServer((req, res) => {
-      const upstream = net.createConnection(upstreamPort, upstreamHost, () => {
-        const reqLine = `${req.method} ${req.url} HTTP/${req.httpVersion}\r\n`;
-        let headers = "";
-        for (let i = 0; i < req.rawHeaders.length; i += 2) {
-          headers += `${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}\r\n`;
-        }
-        headers += `Proxy-Authorization: ${authHeader}\r\n`;
-        upstream.write(reqLine + headers + "\r\n");
-        req.on("error", () => upstream.destroy());
-        upstream.on("error", () => res.destroy());
-        req.pipe(upstream);
-        upstream.pipe(res);
-      });
-      upstream.on("error", () => res.destroy());
-    });
-
-    server.on("connect", (req, clientSocket, head) => {
-      const upstream = net.createConnection(upstreamPort, upstreamHost, () => {
-        upstream.write(
-          `CONNECT ${req.url} HTTP/1.1\r\n` +
-            `Host: ${req.url}\r\n` +
-            `Proxy-Authorization: ${authHeader}\r\n` +
-            `\r\n`
-        );
-
-        let buf = Buffer.alloc(0);
-        const onData = (chunk: Buffer) => {
-          buf = Buffer.concat([buf, chunk]);
-          const headerEnd = buf.indexOf("\r\n\r\n");
-          if (headerEnd === -1) return;
-          upstream.removeListener("data", onData);
-          const statusLine = buf.subarray(0, buf.indexOf("\r\n")).toString();
-          const remaining = buf.subarray(headerEnd + 4);
-
-          if (statusLine.includes("200")) {
-            clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-            if (remaining.length > 0) clientSocket.write(remaining);
-            if (head.length > 0) upstream.write(head);
-            clientSocket.on("error", () => upstream.destroy());
-            upstream.on("error", () => clientSocket.destroy());
-            clientSocket.pipe(upstream);
-            upstream.pipe(clientSocket);
-          } else {
-            clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
-            clientSocket.destroy();
-            upstream.destroy();
-          }
-        };
-        upstream.on("data", onData);
-      });
-
-      clientSocket.on("error", () => upstream.destroy());
-      upstream.on("error", () => {
-        clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
-        clientSocket.destroy();
-      });
-    });
-
-    server.listen(0, "127.0.0.1", () => {
-      const addr = server.address();
-      if (!addr || typeof addr === "string") {
-        reject(new Error("Failed to start auth proxy"));
-        return;
-      }
-      resolve({ server, port: addr.port });
-    });
-
-    server.on("error", reject);
-  });
-}
-
-function parseProxy(proxyUrl: string): {
-  host: string;
-  port: number;
-  username?: string;
-  password?: string;
-  hasAuth: boolean;
-} {
-  const url = new URL(proxyUrl);
-  return {
-    host: url.hostname,
-    port: parseInt(url.port, 10),
-    username: url.username || undefined,
-    password: url.password || undefined,
-    hasAuth: !!url.username,
-  };
-}
-
 // ─── Types ─────────────────────────────────────────────────────────
 
-export type PoolTier = "datacenter" | "residential" | "direct";
+export type PoolTier = "standard" | "premium" | "direct";
 
 export interface PlaywrightPoolOptions {
   tiers: PlaywrightTierConfig[];
@@ -237,9 +99,10 @@ export class ChromeInstance {
   private chromeProcess: ChildProcess | null = null;
   private pwBrowser: PlaywrightBrowser | null = null;
   private pwContext: PlaywrightBrowserContext | null = null;
-  private authProxyServer: Server | null = null;
+  private anonymizedProxyUrl: string | null = null;
   private userDataDir: string | null = null;
   private wsEndpoint: string | null = null;
+  private fingerprint: BrowserFingerprintWithHeaders["fingerprint"] | null = null;
 
   readonly ready: Promise<void>;
   private resolveReady!: () => void;
@@ -381,22 +244,25 @@ export class ChromeInstance {
     try {
       this.logger.debug({ proxy: redactProxy(this.proxyUrl) }, "launching Chrome");
 
-      // Set up proxy forwarder if needed
+      // Set up proxy via proxy-chain (handles auth transparently, preserves TLS)
       let chromeProxyArg: string | undefined;
 
       if (this.proxyUrl) {
-        const parsed = parseProxy(this.proxyUrl);
-        if (parsed.hasAuth) {
-          const { server, port } = await startAuthProxy(
-            parsed.host,
-            parsed.port,
-            parsed.username!,
-            parsed.password!
-          );
-          this.authProxyServer = server;
-          chromeProxyArg = `http://127.0.0.1:${port}`;
-        } else {
-          chromeProxyArg = this.proxyUrl;
+        this.anonymizedProxyUrl = await anonymizeProxy(this.proxyUrl);
+        chromeProxyArg = this.anonymizedProxyUrl;
+      }
+
+      // Generate fingerprint once per ChromeInstance (cached across relaunches)
+      if (!this.fingerprint) {
+        try {
+          const generator = new FingerprintGenerator();
+          const result = generator.getFingerprint({
+            browsers: [{ name: "chrome" as const, minVersion: 120 }],
+            operatingSystems: [process.platform === "darwin" ? "macos" : "linux"],
+          });
+          this.fingerprint = result.fingerprint;
+        } catch (err) {
+          this.logger.warn({ err }, "Fingerprint generation failed, continuing without");
         }
       }
 
@@ -404,42 +270,12 @@ export class ChromeInstance {
       this.userDataDir = mkdtempSync(join(tmpdir(), "reader-pw-"));
 
       const chromePath = findChromePath();
-      const args = [
-        "--remote-debugging-port=0",
-        `--user-data-dir=${this.userDataDir}`,
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--use-mock-keychain",
-        "--disable-features=MediaRouter",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-background-networking",
-        "--disable-default-apps",
-        "--disable-extensions",
-        "--disable-sync",
-        "--disable-translate",
-        "--metrics-recording-only",
-        "--mute-audio",
-        "--disable-blink-features=AutomationControlled",
-        // Always accept certs — sites behind proxies, self-signed internal
-        // sites, and misconfigured TLS should not block scraping.
-        "--ignore-certificate-errors",
-      ];
-
-      // Run headless unless showChrome is true OR a virtual display (xvfb)
-      // is available. Non-headless Chrome bypasses Cloudflare Turnstile
-      // detection that blocks both headless modes.
-      const hasDisplay = !!process.env.DISPLAY;
-      if (!this.showChrome && !hasDisplay) {
-        args.push("--headless=new");
-      }
-
-      if (chromeProxyArg) {
-        args.push(`--proxy-server=${chromeProxyArg}`);
-        args.push("--proxy-bypass-list=<-loopback>");
-      }
-
-      args.push("about:blank");
+      const args = buildChromeArgs({
+        userDataDir: this.userDataDir,
+        headless: !this.showChrome,
+        proxyServer: chromeProxyArg,
+        userAgent: this.fingerprint?.navigator?.userAgent ?? this.userAgent,
+      });
 
       this.chromeProcess = spawn(chromePath, args, {
         detached: process.platform !== "win32",
@@ -475,29 +311,62 @@ export class ChromeInstance {
         });
       });
 
-      // Connect Playwright via CDP with stealth plugin to avoid bot detection.
-      // playwright-extra + puppeteer-extra-plugin-stealth patches navigator.webdriver,
-      // chrome.runtime, plugins, languages, WebGL, and other automation signals.
-      const { chromium } = await import("playwright-extra");
-      const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
-      chromium.use(StealthPlugin());
+      // Connect Playwright via CDP (standard, no stealth wrapper).
+      // Anti-detection is handled by fingerprint-generator + fingerprint-injector
+      // which creates complete, consistent browser identities (WebGL, canvas,
+      // navigator, hardware concurrency, device memory, screen dimensions).
+      const { chromium } = await import("playwright-core");
       this.pwBrowser = await chromium.connectOverCDP(this.wsEndpoint);
 
-      // Use the default context or create one with custom userAgent
+      // Close default context pages to avoid leaks
       const contexts = this.pwBrowser.contexts();
-      if (this.userAgent) {
-        // When a custom UA is set, create a fresh context with it.
-        // Close the default context's pages to avoid leaks.
-        if (contexts.length > 0) {
-          for (const page of contexts[0].pages()) {
-            await page.close().catch(() => {});
-          }
+      if (contexts.length > 0) {
+        for (const page of contexts[0].pages()) {
+          await page.close().catch(() => {});
         }
-        this.pwContext = await this.pwBrowser.newContext({ userAgent: this.userAgent });
-      } else if (contexts.length > 0) {
-        this.pwContext = contexts[0];
-      } else {
-        this.pwContext = await this.pwBrowser.newContext();
+      }
+
+      // Create context with fingerprint identity
+      const contextOptions: Record<string, unknown> = {};
+      if (this.fingerprint) {
+        contextOptions.userAgent = this.fingerprint.navigator?.userAgent;
+        if (this.fingerprint.screen) {
+          contextOptions.viewport = {
+            width: this.fingerprint.screen.width,
+            height: this.fingerprint.screen.height,
+          };
+        }
+        if (this.fingerprint.navigator?.language) {
+          contextOptions.locale = this.fingerprint.navigator.language;
+        }
+      } else if (this.userAgent) {
+        contextOptions.userAgent = this.userAgent;
+      }
+
+      this.pwContext = await this.pwBrowser.newContext(contextOptions);
+
+      // Inject fingerprint overrides (WebGL, navigator, canvas, etc.)
+      if (this.fingerprint) {
+        try {
+          const injector = new FingerprintInjector();
+          await injector.attachFingerprintToPlaywright(this.pwContext, {
+            fingerprint: this.fingerprint,
+            headers: {},
+          });
+        } catch (err) {
+          this.logger.warn({ err }, "Fingerprint injection failed, continuing without");
+        }
+      }
+
+      // Remove __pwInitScripts marker that Playwright adds to every addInitScript() call.
+      // This object is detectable by anti-bot systems (Cloudflare, DataDome, etc.).
+      // Running this as the last init script ensures it's deleted before page scripts execute.
+      try {
+        await this.pwContext!.addInitScript(() => {
+          delete (window as unknown as Record<string, unknown>).__pwInitScripts;
+        });
+      } catch {
+        /* non-fatal */
       }
 
       // Handle Chrome crashes
@@ -551,10 +420,10 @@ export class ChromeInstance {
       this.chromeProcess = null;
     }
 
-    // Stop auth proxy
-    if (this.authProxyServer) {
-      this.authProxyServer.close();
-      this.authProxyServer = null;
+    // Stop proxy-chain anonymized proxy
+    if (this.anonymizedProxyUrl) {
+      await closeAnonymizedProxy(this.anonymizedProxyUrl, true).catch(() => {});
+      this.anonymizedProxyUrl = null;
     }
 
     // Remove temp profile
@@ -790,8 +659,8 @@ function redactProxy(proxyUrl: string | null): string {
 export function buildPlaywrightTierConfigs(
   pools:
     | {
-        datacenter?: Array<{ url?: string }>;
-        residential?: Array<{ url?: string }>;
+        standard?: Array<{ url?: string }>;
+        premium?: Array<{ url?: string }>;
       }
     | undefined,
   opts: { directPoolSize?: number } = {}
@@ -802,17 +671,17 @@ export function buildPlaywrightTierConfigs(
     return (list ?? []).map((p) => p.url ?? "").filter((u) => u.length > 0);
   }
 
-  const dcUrls = extractUrls(pools?.datacenter);
-  const resUrls = extractUrls(pools?.residential);
+  const stdUrls = extractUrls(pools?.standard);
+  const premUrls = extractUrls(pools?.premium);
 
   const tiers: PlaywrightTierConfig[] = [];
 
-  if (dcUrls.length > 0 || resUrls.length > 0) {
-    if (dcUrls.length > 0) {
-      tiers.push({ tier: "datacenter", proxyUrls: dcUrls });
+  if (stdUrls.length > 0 || premUrls.length > 0) {
+    if (stdUrls.length > 0) {
+      tiers.push({ tier: "standard", proxyUrls: stdUrls });
     }
-    if (resUrls.length > 0) {
-      tiers.push({ tier: "residential", proxyUrls: resUrls });
+    if (premUrls.length > 0) {
+      tiers.push({ tier: "premium", proxyUrls: premUrls });
     }
   } else {
     const directUrls: Array<string | null> = Array.from({ length: directSize }, () => null);

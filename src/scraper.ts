@@ -15,12 +15,9 @@ import {
   type ProxyTier,
 } from "./types";
 import { EngineOrchestrator, ScrapeFailedError } from "./engines/index.js";
-import { getDomainProfile, applyDomainProfile } from "./config/domain-profiles.js";
-import { isBlockedResponse } from "./utils/block-detector.js";
 import { rewriteUrl } from "./utils/url-rewriter.js";
 import {
   wrapError,
-  ReaderError,
   DNSError,
   RobotsBlockedError,
   InvalidUrlError,
@@ -28,21 +25,16 @@ import {
 } from "./errors.js";
 import type { PerProxyGate } from "./proxy/proxy-gate.js";
 import type { ProxyHealthTracker } from "./proxy/health-tracker.js";
-import { redactProxyUrl } from "./browser/proxy-bound-browser.js";
+import { redactProxyUrl } from "./proxy/config.js";
 
 /** Default hard deadline for any single URL (ms). */
-const DEFAULT_HARD_DEADLINE_MS = 45_000;
-
-/** Default timeout for the first datacenter proxy attempt (ms). */
-const DEFAULT_DATACENTER_TIMEOUT_MS = 10_000;
+const DEFAULT_HARD_DEADLINE_MS = 30_000;
 
 /**
- * Scraper class with built-in concurrency and proxy escalation.
+ * Scraper class with built-in concurrency.
  *
- * Retry strategy per URL:
- *   1. Hero on datacenter proxy, 10s timeout
- *   2. Any failure → Hero on residential proxy, remaining time (up to 30s total)
- *   3. Any failure → done, report error
+ * Each URL gets a single scrape attempt through the Playwright engine
+ * using the configured proxy tier (standard or premium).
  *
  * Non-retryable errors (DNS, invalid URL, robots.txt) skip directly to failure.
  */
@@ -106,87 +98,20 @@ export class Scraper {
   }
 
   /**
-   * Scrape a single URL with proxy escalation.
-   *
-   *   1. Try datacenter proxy with 10s timeout
-   *   2. On ANY failure (timeout, empty, blocked, error) → residential with remaining time
-   *   3. On failure → done
+   * Scrape a single URL using the configured proxy tier.
    */
   private async scrapeSingleUrlWithRetry(
     url: string,
     index: number
   ): Promise<{ result: WebsiteScrapeResult | null; error?: string }> {
-    const hardDeadlineMs = this.options.hardDeadlineMs ?? DEFAULT_HARD_DEADLINE_MS;
-    const datacenterTimeoutMs = this.options.datacenterTimeoutMs ?? DEFAULT_DATACENTER_TIMEOUT_MS;
-    const deadline = Date.now() + hardDeadlineMs;
-
-    // If domain profile or caller specifies residential, skip datacenter attempt entirely
-    const domainProfile = getDomainProfile(url, this.options.domainProfiles);
-    const profileTier = domainProfile?.proxyTier ?? this.options.proxyTier;
-    if (profileTier === "residential") {
-      try {
-        const result = await this.scrapeSingleUrl(url, index, "residential", hardDeadlineMs);
-        if (result) return { result };
-      } catch (error: any) {
-        this.logger.error(`[scraper] Residential attempt failed for ${url}: ${error.message}`);
-        return { result: null, error: error.message };
-      }
-      return { result: null, error: `Residential scrape returned no data for ${url}` };
-    }
-
-    // --- Attempt 1: datacenter, configurable timeout ---
-    try {
-      const result = await this.scrapeSingleUrl(url, index, undefined, datacenterTimeoutMs);
-
-      if (result) {
-        // Check for soft blocks (200 + bot page content)
-        const blockCheck = isBlockedResponse(
-          result.metadata?.statusCode,
-          result.rawHtml,
-          this.options.blockDetection
-        );
-
-        if (!blockCheck.blocked) {
-          return { result };
-        }
-
-        this.logger.warn(
-          `[scraper] Block detected for ${url} (${blockCheck.reason}), escalating to residential`
-        );
-        // Fall through to residential attempt
-      }
-    } catch (error: any) {
-      // Non-retryable errors — don't escalate
-      if (error instanceof ReaderError && error.retryable === false) {
-        this.logger.error(`Non-retryable error for ${url}: ${error.name} - ${error.message}`);
-        return { result: null, error: error.message };
-      }
-
-      this.logger.warn(
-        `[scraper] Datacenter attempt failed for ${url}: ${error.message}, escalating to residential`
-      );
-      // Fall through to residential attempt
-    }
-
-    // --- Attempt 2: residential, remaining time ---
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) {
-      return {
-        result: null,
-        error: `Scrape exceeded ${hardDeadlineMs / 1000}s hard cap for ${url}`,
-      };
-    }
+    const timeoutMs = this.options.hardDeadlineMs ?? DEFAULT_HARD_DEADLINE_MS;
 
     try {
-      const result = await this.scrapeSingleUrl(url, index, "residential", remaining);
-
-      if (result) {
-        return { result };
-      }
-
-      return { result: null, error: `No content returned for ${url} on residential proxy` };
+      const result = await this.scrapeSingleUrl(url, index, undefined, timeoutMs);
+      if (result) return { result };
+      return { result: null, error: `No content returned for ${url}` };
     } catch (error: any) {
-      this.logger.error(`[scraper] Residential attempt failed for ${url}: ${error.message}`);
+      this.logger.error(`[scraper] Scrape failed for ${url}: ${error.message}`);
       return { result: null, error: error.message };
     }
   }
@@ -226,13 +151,9 @@ export class Scraper {
     }
 
     try {
-      // Apply domain-specific overrides (caller-provided profiles)
-      const domainProfile = getDomainProfile(url, this.options.domainProfiles);
-      let effectiveOptions = domainProfile
-        ? applyDomainProfile(this.options, domainProfile)
-        : { ...this.options };
+      let effectiveOptions = { ...this.options };
 
-      // Apply proxy escalation override
+      // Apply proxy override (for escalation or explicit tier selection)
       if (proxyOverride) {
         effectiveOptions = { ...effectiveOptions, proxyTier: proxyOverride };
       }
@@ -240,12 +161,6 @@ export class Scraper {
       // Apply timeout override
       if (timeoutMs) {
         effectiveOptions = { ...effectiveOptions, timeoutMs };
-      }
-
-      if (domainProfile && this.options.verbose) {
-        this.logger.info(
-          `[scraper] Applied domain profile for ${url}: ${JSON.stringify(domainProfile)}`
-        );
       }
 
       // --- Per-attempt proxy resolution ---
@@ -259,21 +174,10 @@ export class Scraper {
 
       const currentProxyUrl = effectiveOptions.proxy?.url ?? null;
 
-      // Domain-profile per-IP cap override
-      if (domainProfile?.maxConcurrentPerProxy && currentProxyUrl && this.options.proxyGate) {
-        (this.options.proxyGate as PerProxyGate).setOverride(
-          currentProxyUrl,
-          domainProfile.maxConcurrentPerProxy
-        );
-      }
-
       if (this.options.verbose) {
         this.logger.info(
-          `[scraper] ${url} using tier=${effectiveOptions.proxyTier ?? "auto"} ` +
-            `proxy=${redactProxyUrl(currentProxyUrl)}` +
-            (domainProfile?.maxConcurrentPerProxy
-              ? ` cap=${domainProfile.maxConcurrentPerProxy}`
-              : "")
+          `[scraper] ${url} using tier=${effectiveOptions.proxyTier ?? "standard"} ` +
+            `proxy=${redactProxyUrl(currentProxyUrl)}`
         );
       }
 
@@ -312,7 +216,7 @@ export class Scraper {
       }
 
       if (this.options.verbose) {
-        this.logger.info(`[scraper] ${url} scraped with Hero in ${engineResult.duration}ms`);
+        this.logger.info(`[scraper] ${url} scraped in ${engineResult.duration}ms`);
       }
 
       // Detect JSON responses

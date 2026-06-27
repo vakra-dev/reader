@@ -44,13 +44,7 @@ cd examples
 npm install
 ```
 
-2. Start Ulixee Cloud (in a separate terminal):
-
-```bash
-npx @ulixee/cloud start
-```
-
-3. Run any example using tsx:
+2. Run any example using tsx:
 
 ```bash
 # Basic examples

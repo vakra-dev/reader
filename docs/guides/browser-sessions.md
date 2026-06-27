@@ -123,7 +123,7 @@ await sendPageCDP(ws, attached.sessionId, "Page.navigate", {
 ```
 reader.browser()
   │
-  ├── Launches Chrome with stealth (Hero emulation scripts)
+  ├── Launches Chrome with stealth (Playwright emulation scripts)
   ├── Extracts CDP WebSocket URL
   ├── Starts auto-close timeout (default: 5 minutes)
   │
@@ -192,5 +192,5 @@ npx reader browser stop <sessionId>
 
 - Each session launches its own Chrome process (~300MB memory)
 - Sessions are isolated from the scrape/crawl browser pool
-- MITM proxy (TLS fingerprinting) is disabled for sessions. Emulation scripts provide the stealth layer
+- Stealth is provided by Playwright-level emulation scripts injected at browser launch
 - Selenium/chromedriver is not supported (requires exclusive Chrome access). Use Playwright, Puppeteer, or raw CDP instead.

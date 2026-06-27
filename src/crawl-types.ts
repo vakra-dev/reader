@@ -1,5 +1,4 @@
 import type { ScrapeResult, ProxyConfig, ProxyTier } from "./types";
-import type { IBrowserPool } from "./browser/types";
 
 /**
  * Crawl options interface
@@ -50,13 +49,13 @@ export interface CrawlOptions {
   removeBase64Images?: boolean;
 
   // ============================================================================
-  // Hero-specific options
+  // Browser options
   // ============================================================================
 
-  /** Proxy configuration for Hero */
+  /** Proxy configuration */
   proxy?: ProxyConfig;
 
-  /** Proxy tier selection (default: "auto") */
+  /** Proxy tier selection: "standard" (default) or "premium" */
   proxyTier?: ProxyTier;
 
   /** Custom user agent string */
@@ -67,21 +66,6 @@ export interface CrawlOptions {
 
   /** Show Chrome window (default: false) */
   showChrome?: boolean;
-
-  /** Connection to Hero Core (for shared Core usage) */
-  connectionToCore?: any;
-
-  /** Legacy single browser pool (internal). Kept for backward-compat during the migration. */
-  pool?: IBrowserPool;
-
-  /**
-   * Tiered browser pool (internal, provided by ReaderClient).
-   *
-   * When present, the crawler uses this instead of the legacy `pool`.
-   * Typed as `unknown` to avoid a type cycle; the crawler casts it to
-   * TieredBrowserPool at the use site.
-   */
-  tieredPool?: unknown;
 
   /**
    * Playwright browser pool (internal, provided by ReaderClient).

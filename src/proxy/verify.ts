@@ -20,12 +20,12 @@
 
 import { fetch as undiciFetch, ProxyAgent } from "undici";
 import type { ProxyPoolConfig } from "../types";
-import { redactProxyUrl } from "../browser/proxy-bound-browser";
+import { redactProxyUrl } from "./config";
 
 export const IP_CHECK_URL = "https://api.ipify.org?format=json";
 export const IP_CHECK_TIMEOUT_MS = 10_000;
 
-export type ProxyTierName = "datacenter" | "residential";
+export type ProxyTierName = "standard" | "premium";
 
 export interface VerifiedProxy {
   proxyUrl: string;
@@ -76,7 +76,7 @@ export async function verifyProxies(
 
   const tasks: Array<Promise<void>> = [];
 
-  for (const tier of ["datacenter", "residential"] as const) {
+  for (const tier of ["standard", "premium"] as const) {
     for (const cfg of pools[tier] ?? []) {
       const url = cfg.url;
       if (!url) continue;
@@ -113,7 +113,7 @@ export async function verifyProxiesOrThrow(
       ...result.failed.map((f) => `  - [${f.tier}] ${redactProxyUrl(f.proxyUrl)}: ${f.error}`),
       "",
       "The daemon refuses to start with a broken proxy configuration.",
-      "Fix or remove the failing proxy URLs in PROXY_DATACENTER / PROXY_RESIDENTIAL,",
+      "Fix or remove the failing proxy URLs in PROXY_STANDARD / PROXY_PREMIUM,",
       `or check whether ${IP_CHECK_URL} is reachable from this network.`,
     ];
     throw new Error(lines.join("\n"));

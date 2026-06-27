@@ -10,10 +10,10 @@ All commands run from the `reader` directory. Requires Node v22+ (`nvm use v22`)
 npx tsx --tsconfig examples/tsconfig.json examples/basic/<example>.ts
 ```
 
-If Hero's bundled Chrome binary isn't available (e.g. Apple Silicon), point to your local Chrome:
+Playwright bundles Chromium automatically. If you need to point to a specific Chrome installation:
 
 ```bash
-export CHROME_139_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+export CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 ```
 
 ## Scraping

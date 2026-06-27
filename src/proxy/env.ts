@@ -1,16 +1,16 @@
 /**
  * Environment-driven proxy pool configuration.
  *
- * Lets operators configure datacenter and residential proxy pools without
+ * Lets operators configure standard and premium proxy pools without
  * touching code — relevant for the daemon, which is run as a long-lived
  * process and gets its config from `.env`.
  *
  * Env vars:
- *   PROXY_DATACENTER   - one URL, or comma-separated list of URLs
- *   PROXY_RESIDENTIAL  - one URL, or comma-separated list of URLs
+ *   PROXY_STANDARD   - one URL, or comma-separated list of URLs
+ *   PROXY_PREMIUM    - one URL, or comma-separated list of URLs
  *
  * Each URL must be of the form `http://user:pass@host:port`. Empty strings
- * and whitespace-only entries are ignored, so `PROXY_DATACENTER=,` or an
+ * and whitespace-only entries are ignored, so `PROXY_STANDARD=,` or an
  * unset var both resolve to "no proxies for that tier". An unparseable
  * URL throws at startup — we fail loud here rather than silently fall
  * through to direct connections, which would hide a misconfiguration
@@ -60,14 +60,14 @@ export interface ParsedProxyPools {
 }
 
 /**
- * Read PROXY_DATACENTER and PROXY_RESIDENTIAL from `env` (defaults to
+ * Read PROXY_STANDARD and PROXY_PREMIUM from `env` (defaults to
  * `process.env`) and build a ProxyPoolConfig.
  */
 export function parseProxyPoolsFromEnv(env: NodeJS.ProcessEnv = process.env): ParsedProxyPools {
-  const datacenter = parseList(env.PROXY_DATACENTER, "datacenter");
-  const residential = parseList(env.PROXY_RESIDENTIAL, "residential");
+  const standard = parseList(env.PROXY_STANDARD, "standard");
+  const premium = parseList(env.PROXY_PREMIUM, "premium");
 
-  if (datacenter.length === 0 && residential.length === 0) {
+  if (standard.length === 0 && premium.length === 0) {
     return {
       pools: undefined,
       summary: "no proxies configured — scrapes go direct",
@@ -76,9 +76,9 @@ export function parseProxyPoolsFromEnv(env: NodeJS.ProcessEnv = process.env): Pa
 
   return {
     pools: {
-      ...(datacenter.length > 0 ? { datacenter } : {}),
-      ...(residential.length > 0 ? { residential } : {}),
+      ...(standard.length > 0 ? { standard } : {}),
+      ...(premium.length > 0 ? { premium } : {}),
     },
-    summary: `proxies loaded: ${datacenter.length} datacenter, ${residential.length} residential`,
+    summary: `proxies loaded: ${standard.length} standard, ${premium.length} premium`,
   };
 }

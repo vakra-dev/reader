@@ -16,7 +16,7 @@ import type { ScrapeOptions } from "../types";
  */
 export interface DomainProfile {
   /** Override proxy tier for this domain */
-  proxyTier?: "datacenter" | "residential";
+  proxyTier?: "standard" | "premium";
   /** Override timeout for this domain */
   timeoutMs?: number;
   /** Override batch concurrency (limit parallel requests to this domain) */

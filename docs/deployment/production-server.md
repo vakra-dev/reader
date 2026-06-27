@@ -4,7 +4,7 @@ Deploy Reader as a production-ready API server.
 
 ## Overview
 
-For production servers, use a **shared Hero Core** pattern instead of spawning individual Chrome processes per request. This dramatically reduces resource usage and improves performance.
+For production servers, create a single `ReaderClient` instance at startup and share it across all requests. The client manages a Playwright browser pool internally, reusing Chrome instances efficiently.
 
 ## Architecture
 
@@ -12,19 +12,19 @@ For production servers, use a **shared Hero Core** pattern instead of spawning i
 ┌─────────────────────────────────────────────────┐
 │                Express Server                    │
 ├─────────────────────────────────────────────────┤
-│              Shared Hero Core                    │
-│         (Single Chrome Process)                  │
+│           ReaderClient (singleton)               │
+│          (Playwright Browser Pool)               │
 ├─────────────────────────────────────────────────┤
-│   Browser 1  │  Browser 2  │  Browser 3  │ ...  │
-│   (Tab)      │  (Tab)      │  (Tab)      │      │
+│   Chrome 1   │  Chrome 2   │  Chrome 3   │ ...  │
+│   (Tabs)     │  (Tabs)     │  (Tabs)     │      │
 └─────────────────────────────────────────────────┘
 ```
 
 **Benefits:**
-- Single Chrome process instead of one per request
+- Browser pool shared across all requests
 - Lower memory footprint
-- Faster browser creation
-- Better resource utilization
+- Fast tab allocation (no browser startup per request)
+- Automatic browser recycling and health monitoring
 
 ## Basic Setup
 
@@ -32,7 +32,6 @@ For production servers, use a **shared Hero Core** pattern instead of spawning i
 
 ```bash
 npm install @vakra-dev/reader express
-npm install @ulixee/hero-core @ulixee/net  # For shared Core
 ```
 
 ### Server Code
@@ -40,34 +39,26 @@ npm install @ulixee/hero-core @ulixee/net  # For shared Core
 ```typescript
 // server.ts
 import express from "express";
-import HeroCore from "@ulixee/hero-core";
-import { TransportBridge } from "@ulixee/net";
-import { ConnectionToHeroCore } from "@ulixee/hero";
-import { scrape, crawl } from "@vakra-dev/reader";
+import { ReaderClient } from "@vakra-dev/reader";
 
 const app = express();
 app.use(express.json());
 
-// Shared Hero Core - initialized once
-let heroCore: HeroCore;
-
-async function createConnection() {
-  const bridge = new TransportBridge();
-  heroCore.addConnection(bridge.transportToClient);
-  return new ConnectionToHeroCore(bridge.transportToCore);
-}
+// Shared ReaderClient - initialized once, reused for all requests
+const reader = new ReaderClient({
+  browserPool: {
+    size: 5,
+    retireAfterPages: 100,
+    retireAfterMinutes: 30,
+  },
+});
 
 // Scrape endpoint
 app.post("/scrape", async (req, res) => {
   const { urls, formats = ["markdown"] } = req.body;
 
   try {
-    const result = await scrape({
-      urls,
-      formats,
-      connectionToCore: await createConnection(),
-    });
-
+    const result = await reader.scrape({ urls, formats });
     res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -79,14 +70,7 @@ app.post("/crawl", async (req, res) => {
   const { url, depth = 2, maxPages = 20, scrape: doScrape = false } = req.body;
 
   try {
-    const result = await crawl({
-      url,
-      depth,
-      maxPages,
-      scrape: doScrape,
-      connectionToCore: await createConnection(),
-    });
-
+    const result = await reader.crawl({ url, depth, maxPages, scrape: doScrape });
     res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -95,16 +79,11 @@ app.post("/crawl", async (req, res) => {
 
 // Health check
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", heroCore: heroCore ? "running" : "stopped" });
+  res.json({ status: "ok", browserPool: "running" });
 });
 
 // Start server
 async function start() {
-  // Initialize shared Hero Core
-  heroCore = new HeroCore();
-  await heroCore.start();
-  console.log("Hero Core started");
-
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
@@ -114,9 +93,7 @@ async function start() {
 // Graceful shutdown
 async function shutdown() {
   console.log("Shutting down...");
-  if (heroCore) {
-    await heroCore.close();
-  }
+  await reader.close();
   process.exit(0);
 }
 
@@ -217,10 +194,9 @@ const requestQueue = new PQueue({
 app.post("/scrape", async (req, res) => {
   try {
     const result = await requestQueue.add(() =>
-      scrape({
+      reader.scrape({
         urls: req.body.urls,
         formats: req.body.formats,
-        connectionToCore: await createConnection(),
       })
     );
 
@@ -239,10 +215,7 @@ async function scrapeWithTimeout(options: ScrapeOptions, timeoutMs: number) {
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    return await scrape({
-      ...options,
-      connectionToCore: await createConnection(),
-    });
+    return await reader.scrape(options);
   } finally {
     clearTimeout(timeout);
   }
@@ -273,7 +246,7 @@ app.use((req, res, next) => {
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    heroCore: heroCore ? "running" : "stopped",
+    browserPool: "running",
     stats: {
       activeRequests,
       totalRequests,
@@ -302,7 +275,7 @@ app.post("/scrape", async (req, res) => {
   const startTime = Date.now();
 
   try {
-    const result = await scrape({ ... });
+    const result = await reader.scrape({ ... });
 
     logger.info({
       type: "scrape",

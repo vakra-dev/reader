@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Load .env from cwd before any code reads process.env. This makes
-// `PROXY_DATACENTER` / `PROXY_RESIDENTIAL` / `READER_AUTH_TOKEN` etc.
+// `PROXY_STANDARD` / `PROXY_PREMIUM` / `READER_AUTH_TOKEN` etc.
 // work from a local `.env` file without the operator having to export
 // vars manually before starting the daemon.
 import "dotenv/config";
@@ -254,8 +254,8 @@ program
           ...(options.proxy
             ? {
                 proxyPools: {
-                  datacenter: [{ url: options.proxy }],
-                  residential: [{ url: options.proxy }],
+                  standard: [{ url: options.proxy }],
+                  premium: [{ url: options.proxy }],
                 },
               }
             : {}),
@@ -411,8 +411,8 @@ program
           ...(options.proxy
             ? {
                 proxyPools: {
-                  datacenter: [{ url: options.proxy }],
-                  residential: [{ url: options.proxy }],
+                  standard: [{ url: options.proxy }],
+                  premium: [{ url: options.proxy }],
                 },
               }
             : {}),

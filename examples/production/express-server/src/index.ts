@@ -2,7 +2,7 @@
  * Express Server Example for Reader
  *
  * Demonstrates how to run Reader as a REST API.
- * Uses ReaderClient which manages the HeroCore lifecycle internally.
+ * Uses ReaderClient which manages the browser pool lifecycle internally.
  *
  * Key concepts:
  * - Initialize ReaderClient once at startup
@@ -242,7 +242,7 @@ app.use((req: Request, res: Response) => {
 // Initialize ReaderClient and start Express server
 async function startServer() {
   try {
-    // Initialize ReaderClient (starts HeroCore internally)
+    // Initialize ReaderClient (pre-warms the browser pool)
     reader = new ReaderClient({ verbose: true });
     await reader.start();
     console.log("[reader] ReaderClient started");

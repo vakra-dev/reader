@@ -1,13 +1,11 @@
-import type { IBrowserPool } from "./browser/types";
-
 /**
- * Proxy configuration for Hero
+ * Proxy configuration
  */
 export interface ProxyConfig {
   /** Full proxy URL (takes precedence over other fields) */
   url?: string;
   /** Proxy type */
-  type?: "datacenter" | "residential";
+  type?: "standard" | "premium";
   /** Proxy username */
   username?: string;
   /** Proxy password */
@@ -16,7 +14,7 @@ export interface ProxyConfig {
   host?: string;
   /** Proxy port */
   port?: number;
-  /** Country code for residential proxies (e.g., 'us', 'uk') */
+  /** Country code for premium proxies (e.g., 'us', 'uk') */
   country?: string;
   /** IANA timezone ID matching the proxy's exit location (e.g., 'America/Los_Angeles') */
   timezoneId?: string;
@@ -25,20 +23,19 @@ export interface ProxyConfig {
 /**
  * Proxy tier — controls which proxy pool is used
  *
- * - "datacenter": Fast, cheap datacenter IPs — works for most sites
- * - "residential": Residential/mobile IPs — needed for anti-bot sites (Amazon, LinkedIn)
- * - "auto": Start with datacenter, auto-escalate to residential on block detection
+ * - "standard": Fast, cheap datacenter IPs — works for most sites
+ * - "premium": Residential/mobile IPs — needed for anti-bot sites (Amazon, LinkedIn)
  */
-export type ProxyTier = "datacenter" | "residential" | "auto";
+export type ProxyTier = "standard" | "premium";
 
 /**
  * Multi-tier proxy pool configuration
  */
 export interface ProxyPoolConfig {
-  /** Datacenter proxies (fast, cheap, most sites) */
-  datacenter?: ProxyConfig[];
-  /** Residential proxies (slower, expensive, anti-bot sites) */
-  residential?: ProxyConfig[];
+  /** Standard proxies (fast, cheap, most sites) */
+  standard?: ProxyConfig[];
+  /** Premium proxies (slower, expensive, anti-bot sites) */
+  premium?: ProxyConfig[];
 }
 
 /**
@@ -79,7 +76,7 @@ export interface ScrapeOptions {
   /** Output formats - which content fields to include (default: ['markdown']) */
   formats?: Array<"markdown" | "html" | "screenshot">;
 
-  /** Custom user agent string (overrides Hero's default emulated UA) */
+  /** Custom user agent string */
   userAgent?: string;
 
   /** Request timeout in milliseconds (default: 30000) */
@@ -111,31 +108,14 @@ export interface ScrapeOptions {
   navigationSelectors?: string[];
 
   // ============================================================================
-  // Retry & escalation options
+  // Retry options
   // ============================================================================
 
   /**
    * Hard deadline for a single URL in milliseconds (default: 30000).
-   * After this, the scraper gives up regardless of proxy tier.
+   * After this, the scraper gives up.
    */
   hardDeadlineMs?: number;
-
-  /**
-   * Timeout for the first attempt on datacenter proxy in milliseconds (default: 10000).
-   * If no result in this time, the scraper escalates to residential.
-   */
-  datacenterTimeoutMs?: number;
-
-  // ============================================================================
-  // Pluggable config (injected by platform, not set by end users)
-  // ============================================================================
-
-  /**
-   * Domain-specific overrides. Keyed by domain (e.g. "amazon.com").
-   * Matched against the URL's hostname (www. stripped, subdomain matching).
-   * Reader ships with NO built-in profiles — the caller provides them.
-   */
-  domainProfiles?: Record<string, import("./config/domain-profiles.js").DomainProfile>;
 
   /**
    * Block detection config. When provided, the scraper checks successful
@@ -181,17 +161,16 @@ export interface ScrapeOptions {
   onProgress?: (progress: { completed: number; total: number; currentUrl: string }) => void;
 
   // ============================================================================
-  // Hero-specific options
+  // Browser options
   // ============================================================================
 
-  /** Proxy configuration for Hero (single proxy — use proxyTier for pool-based) */
+  /** Proxy configuration (single proxy — use proxyTier for pool-based) */
   proxy?: ProxyConfig;
 
   /**
-   * Proxy tier selection (default: "auto")
-   * - "datacenter": Use datacenter proxy pool
-   * - "residential": Use residential proxy pool
-   * - "auto": Start with datacenter, escalate to residential on block detection
+   * Proxy tier selection
+   * - "standard": Use standard proxy pool (fast, cheap datacenter IPs)
+   * - "premium": Use premium proxy pool (residential/mobile IPs for anti-bot sites)
    *
    * Requires proxyPools to be configured on ReaderClient.
    * If a single `proxy` is set, it takes precedence over pools.
@@ -207,27 +186,8 @@ export interface ScrapeOptions {
   /** Show Chrome window (default: false) */
   showChrome?: boolean;
 
-  /** Connection to Hero Core (for shared Core usage) */
-  connectionToCore?: any;
-
   /** Browser pool configuration (passed from ReaderClient) */
   browserPool?: BrowserPoolConfig;
-
-  /** Browser pool instance (internal, provided by ReaderClient, legacy single pool) */
-  pool?: IBrowserPool;
-
-  /**
-   * Tiered browser pool (internal, provided by ReaderClient).
-   *
-   * When present, this takes precedence over `pool` for the Hero engine.
-   * The Hero engine will ask the tiered pool for the browser bound to
-   * `options.proxy?.url` (falling back to the tier resolved from
-   * `options.proxyTier`).
-   *
-   * Typed as `unknown` to avoid a type cycle between types.ts and
-   * browser/tiered-pool.ts.
-   */
-  tieredPool?: unknown;
 
   /**
    * Playwright browser pool (internal, provided by ReaderClient).
@@ -453,38 +413,28 @@ export const DEFAULT_OPTIONS: Omit<
   | "proxy"
   | "proxyTier"
   | "waitForSelector"
-  | "connectionToCore"
   | "userAgent"
   | "browserPool"
-  | "pool"
-  | "tieredPool"
   | "playwrightPool"
   | "proxyGate"
   | "healthTracker"
   | "resolveProxy"
   | "navigationSelectors"
   | "hardDeadlineMs"
-  | "datacenterTimeoutMs"
-  | "domainProfiles"
   | "blockDetection"
   | "urlRewriters"
 > & {
   proxy?: ProxyConfig;
   proxyTier?: ProxyTier;
   waitForSelector?: string;
-  connectionToCore?: any;
   userAgent?: string;
   browserPool?: BrowserPoolConfig;
-  pool?: IBrowserPool;
-  tieredPool?: unknown;
   playwrightPool?: unknown;
   proxyGate?: unknown;
   healthTracker?: unknown;
   resolveProxy?: (tier: ProxyTier | undefined) => ProxyConfig | undefined;
   navigationSelectors?: string[];
   hardDeadlineMs?: number;
-  datacenterTimeoutMs?: number;
-  domainProfiles?: Record<string, import("./config/domain-profiles.js").DomainProfile>;
   blockDetection?: ScrapeOptions["blockDetection"];
   urlRewriters?: ScrapeOptions["urlRewriters"];
 } = {
@@ -501,7 +451,7 @@ export const DEFAULT_OPTIONS: Omit<
   batchConcurrency: 5,
   batchTimeoutMs: 300000,
   onProgress: () => {}, // Default no-op progress callback
-  // Hero-specific defaults
+  // Browser defaults
   verbose: false,
   showChrome: false,
 };

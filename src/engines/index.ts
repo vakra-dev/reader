@@ -1,8 +1,8 @@
 /**
  * Scraping Engine
  *
- * Playwright (default) and Hero engines with orchestrator for
- * quality checks and proxy block detection.
+ * Playwright engine with orchestrator for quality checks
+ * and proxy block detection.
  */
 
 // Types
@@ -28,7 +28,6 @@ export {
 } from "./errors.js";
 
 // Engines
-export { heroEngine, HeroEngine } from "./hero/index.js";
 export { playwrightEngine, PlaywrightEngine } from "./playwright/index.js";
 
 // Orchestrator

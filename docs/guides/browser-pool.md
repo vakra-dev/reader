@@ -9,10 +9,10 @@ This guide covers browser pool management for production-grade scraping.
 | Simple scraping/crawling | `ReaderClient` |
 | Scripts and CLI tools | `ReaderClient` |
 | Custom browser control | `BrowserPool` |
-| Express/production servers | `BrowserPool` or Shared Hero Core |
+| Express/production servers | `BrowserPool` |
 | Low-level page interaction | `BrowserPool` |
 
-For most use cases, **ReaderClient is recommended** as it manages the HeroCore lifecycle automatically. Use `BrowserPool` when you need direct access to Hero browser instances for custom logic.
+For most use cases, **ReaderClient is recommended** as it manages the Playwright browser pool lifecycle automatically. Use `BrowserPool` when you need direct access to browser pages for custom logic.
 
 ## Overview
 
@@ -61,9 +61,9 @@ const pool = new BrowserPool({ size: 5 });
 await pool.initialize();
 
 // Use withBrowser for automatic acquire/release
-const title = await pool.withBrowser(async (hero) => {
-  await hero.goto("https://example.com");
-  return await hero.document.title;
+const title = await pool.withBrowser(async (page) => {
+  await page.goto("https://example.com");
+  return await page.title();
 });
 
 await pool.shutdown();
@@ -101,7 +101,7 @@ await pool.initialize();
 ```
 
 This:
-1. Creates `size` Hero instances
+1. Creates `size` Playwright page instances
 2. Starts background health checking
 3. Makes pool ready for requests
 
@@ -110,9 +110,9 @@ This:
 **Recommended: Use `withBrowser`**
 
 ```typescript
-const result = await pool.withBrowser(async (hero) => {
-  await hero.goto("https://example.com");
-  const title = await hero.document.title;
+const result = await pool.withBrowser(async (page) => {
+  await page.goto("https://example.com");
+  const title = await page.title();
   return title;
 });
 ```
@@ -125,12 +125,12 @@ Benefits:
 **Manual acquire/release (advanced)**
 
 ```typescript
-const hero = await pool.acquire();
+const page = await pool.acquire();
 try {
-  await hero.goto("https://example.com");
+  await page.goto("https://example.com");
   // ... do work
 } finally {
-  await pool.release(hero);
+  await pool.release(page);
 }
 ```
 
@@ -207,9 +207,9 @@ app.get("/scrape", async (req, res) => {
   const url = req.query.url as string;
 
   try {
-    const result = await pool.withBrowser(async (hero) => {
-      await hero.goto(url);
-      return await hero.document.body.innerHTML;
+    const result = await pool.withBrowser(async (page) => {
+      await page.goto(url);
+      return await page.innerHTML("body");
     });
 
     res.json({ html: result });
@@ -239,7 +239,7 @@ const pool = new BrowserPool({
 
 // If queue is full, acquire() throws an error
 try {
-  const hero = await pool.acquire();
+  const page = await pool.acquire();
 } catch (error) {
   if (error.message.includes("queue full")) {
     // Handle backpressure
@@ -256,45 +256,6 @@ try {
 | 5-20 | 5-10 | 2.5-5 GB |
 | 20-50 | 10-20 | 5-10 GB |
 | 50+ | Consider distributed pools | 10+ GB |
-
-## Shared Hero Core Pattern
-
-For production servers, use a shared Hero Core instead of individual cores per browser:
-
-```typescript
-import HeroCore from "@ulixee/hero-core";
-import { TransportBridge } from "@ulixee/net";
-import { ConnectionToHeroCore } from "@ulixee/hero";
-
-// Initialize once at startup
-const heroCore = new HeroCore();
-await heroCore.start();
-
-// Create connection for each scrape
-function createConnection() {
-  const bridge = new TransportBridge();
-  heroCore.addConnection(bridge.transportToClient);
-  return new ConnectionToHeroCore(bridge.transportToCore);
-}
-
-// Use with scrape
-const result = await scrape({
-  urls: ["https://example.com"],
-  connectionToCore: createConnection(),
-});
-
-// Shutdown on exit
-await heroCore.close();
-```
-
-**Why use shared Core?**
-
-- Single Chrome process manages all browsers
-- Lower memory overhead
-- Better resource utilization
-- Faster browser creation
-
-See [Production Server Guide](../deployment/production-server.md) for complete examples.
 
 ## Memory Management
 
@@ -353,9 +314,9 @@ If a browser crashes, the pool automatically:
 ### Timeout Handling
 
 ```typescript
-const result = await pool.withBrowser(async (hero) => {
+const result = await pool.withBrowser(async (page) => {
   // Set navigation timeout
-  await hero.goto(url, { timeoutMs: 30000 });
+  await page.goto(url, { timeout: 30000 });
 
   // ... rest of logic
 }, { timeoutMs: 60000 }); // Overall operation timeout
@@ -367,9 +328,9 @@ const result = await pool.withBrowser(async (hero) => {
 async function scrapeWithRetry(url: string, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      return await pool.withBrowser(async (hero) => {
-        await hero.goto(url);
-        return await hero.document.body.innerHTML;
+      return await pool.withBrowser(async (page) => {
+        await page.goto(url);
+        return await page.innerHTML("body");
       });
     } catch (error) {
       if (attempt === maxRetries) throw error;
@@ -387,10 +348,10 @@ async function scrapeWithRetry(url: string, maxRetries = 3) {
 3. **Enable recycling** - Prevents memory leaks from long-running browsers
 4. **Monitor stats** - Track pool utilization
 5. **Handle shutdown gracefully** - Close pool on process exit
-6. **Use shared Hero Core** - For production servers
+6. **Use ReaderClient** - For production servers
 
 ## Related Guides
 
-- [Production Server](../deployment/production-server.md) - Shared Hero Core setup
+- [Production Server](../deployment/production-server.md) - Server deployment setup
 - [Cloudflare Bypass](cloudflare-bypass.md) - Challenge handling
 - [Troubleshooting](../troubleshooting.md) - Common issues

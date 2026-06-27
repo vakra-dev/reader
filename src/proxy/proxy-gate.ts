@@ -2,7 +2,7 @@
  * PerProxyGate — per-IP concurrency cap.
  *
  * Enforces a hard limit on the number of simultaneous scrapes that can share a
- * single proxy URL, across ALL engines (http, tlsclient, hero). Sitting above
+ * single proxy URL, across all engines. Sitting above
  * the engines at the scraper boundary, this is what guarantees we never double-
  * book an IP even when a single scrape runs multiple engines in parallel via
  * the orchestrator waterfall.
@@ -14,7 +14,7 @@
  *   that downstream).
  * - Slots are acquired via pLimit, so queueing is FIFO and fair.
  * - The cap is configurable globally and overridable per-proxy, so Amazon's
- *   domain profile can drop it to 1 without affecting datacenter throughput
+ *   domain profile can drop it to 1 without affecting standard proxy throughput
  *   elsewhere.
  *
  * The "2 concurrent per IP" default is a conservative starting point. It can

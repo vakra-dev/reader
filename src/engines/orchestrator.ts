@@ -5,11 +5,16 @@
  * and returns the result. Detects proxy-level blocks (HTTP 401/403/429,
  * redirect loops) so the scraper's retry loop can escalate to a stronger proxy.
  *
- * Uses Playwright engine by default. Hero engine is retained for fallback.
+ * Uses Playwright engine.
  */
 
 import type { EngineMeta, EngineResult } from "./types.js";
-import { ScrapeFailedError, HttpError, EngineUnavailableError } from "./errors.js";
+import {
+  ScrapeFailedError,
+  HttpError,
+  EngineUnavailableError,
+  EngineBlockedError,
+} from "./errors.js";
 import { playwrightEngine } from "./playwright/index.js";
 import type { Logger } from "../utils/logger.js";
 
@@ -118,6 +123,9 @@ export class EngineOrchestrator {
 
       // Detect proxy-level blocks for escalation
       let proxyBlock = false;
+      if (err instanceof EngineBlockedError) {
+        proxyBlock = true;
+      }
       if (err instanceof HttpError && [401, 403, 429].includes(err.statusCode)) {
         proxyBlock = true;
       }
@@ -125,7 +133,7 @@ export class EngineOrchestrator {
         proxyBlock = true;
       }
 
-      log(`[orchestrator] Hero failed: ${err.message}${proxyBlock ? " (proxy block)" : ""}`);
+      log(`[orchestrator] Playwright failed: ${err.message}${proxyBlock ? " (proxy block)" : ""}`);
       throw new ScrapeFailedError(err, { proxyBlock });
     }
   }

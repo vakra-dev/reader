@@ -4,34 +4,34 @@ This guide explains how Reader bypasses Cloudflare and other bot detection syste
 
 ## Overview
 
-Many websites use Cloudflare to protect against bots. Reader uses [Ulixee Hero](https://ulixee.org/) which employs multiple techniques to appear as a legitimate browser.
+Many websites use Cloudflare to protect against bots. Reader uses Playwright with stealth enhancements that employ multiple techniques to appear as a legitimate browser.
 
 ## How It Works
 
-### 1. TLS Fingerprinting
+### 1. Fingerprint Generation
 
-Every browser has a unique TLS (HTTPS) fingerprint based on:
-- Supported cipher suites
-- TLS extensions order
-- ALPN protocols
+Every browser has a unique fingerprint based on:
+- Navigator properties
+- WebGL and Canvas signatures
+- Plugin arrays and hardware info
 
-Hero emulates Chrome's exact TLS fingerprint, making connections indistinguishable from a real browser.
+Reader uses fingerprint-generator to produce realistic, consistent browser fingerprints that match real Chrome installations.
 
-### 2. DNS over TLS
+### 2. WebRTC IP Masking
 
-Chrome uses DNS over HTTPS/TLS to Cloudflare's 1.1.1.1 servers. Hero replicates this behavior, which Cloudflare can detect and uses as a trust signal.
+WebRTC can leak your real IP even behind a proxy. Reader masks WebRTC to prevent IP detection that could reveal automation.
 
-### 3. WebRTC IP Masking
+### 3. Stealth Scripts
 
-WebRTC can leak your real IP even behind a proxy. Hero masks WebRTC to prevent IP detection that could reveal automation.
+Reader injects stealth scripts at page load to patch automation indicators:
+- `navigator.webdriver = false`
+- Realistic navigator properties
+- Consistent canvas and WebGL fingerprints
+- Plugin arrays matching real installations
 
-### 4. JavaScript Environment
+### 4. Proxy Chain
 
-Hero creates a complete browser environment:
-- Navigator properties match real Chrome
-- WebGL fingerprints are realistic
-- Canvas fingerprints are consistent
-- Plugin arrays match real installations
+Traffic is routed through proxy-chain for IP management and to avoid detection from IP-based signals.
 
 ## Challenge Types
 
@@ -89,7 +89,7 @@ const reader = new ReaderClient();
 const result = await reader.scrape({
   urls: ["https://protected-site.com"],
   proxy: {
-    type: "residential",
+    type: "premium",
     host: "proxy.example.com",
     port: 8080,
     username: "username",
@@ -226,15 +226,15 @@ import { ReaderClient } from "@vakra-dev/reader";
 
 const reader = new ReaderClient({
   proxyPools: {
-    datacenter: [{ url: "http://user:pass@dc-proxy:8080" }],
-    residential: [{ url: "http://user:pass@res-proxy:8080" }],
+    standard: [{ url: "http://user:pass@dc-proxy:8080" }],
+    premium: [{ url: "http://user:pass@res-proxy:8080" }],
   },
 });
 
 // Reader auto-detects Cloudflare and escalates to residential proxy if needed
 const result = await reader.scrape({
   urls: ["https://cloudflare-protected-site.com"],
-  proxyTier: "auto",
+  proxyMode: "standard", // or "premium" for anti-bot sites
 });
 
 console.log(result.data[0].markdown);

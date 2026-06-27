@@ -7,7 +7,7 @@ A production-ready Express server exposing Reader as a REST API.
 - Health check endpoint
 - Scrape endpoint (single and batch)
 - Crawl endpoint
-- Shared Hero Core for efficiency
+- Shared browser pool for efficiency
 - Graceful shutdown handling
 
 ## Setup
@@ -80,16 +80,16 @@ curl -X POST http://localhost:3001/crawl \
 | maxPages | number | 20 | Max pages (1-100) |
 | scrape | boolean | false | Also scrape content |
 
-## Why Shared Hero Core?
+## Why a Shared Browser Pool?
 
-This server uses a shared Hero Core instance instead of letting each request create its own:
+This server initializes a single ReaderClient at startup and reuses it across all requests:
 
 | Approach | Startup Time | Memory | Best For |
 |----------|--------------|--------|----------|
-| Per-request Core | ~5-10s | High (each request) | Scripts, CLI |
-| Shared Core | Once at startup | Shared across requests | Servers |
+| Per-request client | ~2-5s | High (each request) | Scripts, CLI |
+| Shared pool | Once at startup | Shared across requests | Servers |
 
-The shared Core is initialized once when the server starts, and all incoming requests share it via `TransportBridge`. This approach:
+The ReaderClient is initialized once when the server starts, and all incoming requests share its browser pool. This approach:
 
 - **Eliminates cold starts** - No browser startup delay per request
 - **Reduces memory usage** - Single Core instance shared across all requests

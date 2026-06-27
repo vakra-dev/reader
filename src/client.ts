@@ -67,8 +67,8 @@ export interface ReaderClientOptions {
    *
    * @example
    * proxyPools: {
-   *   datacenter: [{ url: "http://dc-proxy:port" }],
-   *   residential: [{ url: "http://res-proxy:port" }],
+   *   standard: [{ url: "http://dc-proxy:port" }],
+   *   premium: [{ url: "http://res-proxy:port" }],
    * }
    */
   proxyPools?: ProxyPoolConfig;
@@ -77,11 +77,10 @@ export interface ReaderClientOptions {
   proxyRotation?: ProxyRotation;
 
   /**
-   * Custom user agent string. Overrides Hero's default emulated UA.
-   * Applied to all browsers in the pool.
+   * Custom user agent string. Applied to all browsers in the pool.
    *
-   * WARNING: Hero's default UA matches the Chromium TLS fingerprint.
-   * Overriding can cause TLS/UA mismatches detected by anti-bot systems.
+   * WARNING: Overriding the default UA can cause TLS/UA mismatches
+   * detected by anti-bot systems.
    */
   userAgent?: string;
 
@@ -90,7 +89,7 @@ export interface ReaderClientOptions {
 }
 
 /**
- * ReaderClient manages the HeroCore lifecycle and provides
+ * ReaderClient manages the browser pool lifecycle and provides
  * scrape/crawl methods with automatic initialization.
  */
 export class ReaderClient {
@@ -136,11 +135,11 @@ export class ReaderClient {
    * Get a proxy from a specific tier pool.
    * Falls back to legacy proxy pool if tier pools not configured.
    */
-  getProxyForTier(tier: "datacenter" | "residential"): ProxyConfig | undefined {
+  getProxyForTier(tier: "standard" | "premium"): ProxyConfig | undefined {
     const pools = this.options.proxyPools;
 
     if (pools) {
-      const pool = tier === "residential" ? pools.residential : pools.datacenter;
+      const pool = tier === "premium" ? pools.premium : pools.standard;
       if (pool && pool.length > 0) {
         // Round-robin within the tier pool
         const idx = this.proxyIndex % pool.length;
@@ -157,19 +156,17 @@ export class ReaderClient {
    * Resolve which proxy to use based on tier preference.
    *
    * Priority: proxyTier pool > legacy proxy rotation > undefined
-   *
-   * For "auto" tier: starts with datacenter (caller handles escalation on block detection).
    */
   private resolveProxy(proxyTier?: import("./types").ProxyTier): ProxyConfig | undefined {
-    if (!proxyTier || proxyTier === "auto") {
-      // Auto: prefer datacenter pool if available, else legacy rotation
-      if (this.hasProxyTier("datacenter")) {
-        return this.getProxyForTier("datacenter");
+    if (!proxyTier) {
+      // No tier specified: prefer standard pool if available, else legacy rotation
+      if (this.hasProxyTier("standard")) {
+        return this.getProxyForTier("standard");
       }
       return this.getNextProxy();
     }
 
-    if (proxyTier === "residential" || proxyTier === "datacenter") {
+    if (proxyTier === "premium" || proxyTier === "standard") {
       if (this.hasProxyTier(proxyTier)) {
         return this.getProxyForTier(proxyTier);
       }
@@ -183,15 +180,15 @@ export class ReaderClient {
   /**
    * Check if a proxy tier is available
    */
-  hasProxyTier(tier: "datacenter" | "residential"): boolean {
+  hasProxyTier(tier: "standard" | "premium"): boolean {
     const pools = this.options.proxyPools;
     if (!pools) return false;
-    const pool = tier === "residential" ? pools.residential : pools.datacenter;
+    const pool = tier === "premium" ? pools.premium : pools.standard;
     return !!pool && pool.length > 0;
   }
 
   /**
-   * Initialize HeroCore. Called automatically on first scrape/crawl.
+   * Initialize the browser pool. Called automatically on first scrape/crawl.
    * Can be called explicitly if you want to pre-warm the client.
    */
   async start(): Promise<void> {
@@ -223,8 +220,8 @@ export class ReaderClient {
    *   3. PlaywrightPool  - one Chrome process per proxy URL, connected via
    *      Playwright CDP. Pre-warms all browsers in parallel.
    *
-   * No HeroCore needed — each Chrome instance is spawned directly via
-   * child_process.spawn, and Playwright connects via CDP.
+   * Each Chrome instance is spawned directly via child_process.spawn,
+   * and Playwright connects via CDP.
    */
   private async initializeCore(): Promise<void> {
     try {
@@ -315,7 +312,7 @@ export class ReaderClient {
    *   formats: ['markdown', 'html'],
    * });
    */
-  async scrape(options: Omit<ScrapeOptions, "connectionToCore" | "pool">): Promise<ScrapeResult> {
+  async scrape(options: Omit<ScrapeOptions, "pool">): Promise<ScrapeResult> {
     await this.ensureInitialized();
 
     if (!this.pool) {
@@ -350,7 +347,7 @@ export class ReaderClient {
    *   scrape: true,
    * });
    */
-  async crawl(options: Omit<CrawlOptions, "connectionToCore" | "pool">): Promise<CrawlResult> {
+  async crawl(options: Omit<CrawlOptions, "pool">): Promise<CrawlResult> {
     await this.ensureInitialized();
 
     if (!this.pool) {
@@ -372,10 +369,9 @@ export class ReaderClient {
   /**
    * Create a browser session with a CDP WebSocket endpoint.
    *
-   * Launches a Hero-stealthed Chrome and returns a WebSocket URL that
+   * Launches a Chrome instance and returns a WebSocket URL that
    * Playwright or Puppeteer can connect to via `connectOverCDP()`.
-   * Full anti-bot stealth is active (TLS fingerprinting, navigator
-   * spoofing, WebRTC masking, MITM proxy).
+   * Anti-bot protections are active (stealth scripts, WebRTC masking, proxy routing).
    *
    * @param options - Browser session options
    * @returns Browser session with wsEndpoint and close() method
@@ -384,7 +380,7 @@ export class ReaderClient {
    * ```typescript
    * import { chromium } from 'playwright';
    *
-   * const session = await reader.browser({ proxyTier: 'residential' });
+   * const session = await reader.browser({ proxyTier: 'premium' });
    * const browser = await chromium.connectOverCDP(session.wsEndpoint);
    * const page = browser.contexts()[0].pages()[0];
    *
@@ -394,9 +390,9 @@ export class ReaderClient {
    * await session.close();
    * ```
    */
-  async browser(options: Omit<BrowserOptions, "connectionToCore"> = {}): Promise<BrowserSession> {
-    // No ensureInitialized() — browser sessions create their own dedicated
-    // HeroCore instance. They don't need the shared pool or HeroCore.
+  async browser(options: BrowserOptions = {}): Promise<BrowserSession> {
+    // No ensureInitialized() — browser sessions spawn their own Chrome process.
+    // They don't need the shared pool.
     if (this.closed) {
       throw new Error("ReaderClient has been closed. Create a new instance.");
     }

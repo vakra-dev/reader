@@ -15,7 +15,7 @@ This document describes the internal architecture of Reader, helping contributor
      │  Class    │    │  Class    │    │ (CDP WebSocket)│
      └─────┬─────┘    └─────┬─────┘    └─────┬──────────┘
            │                │                │
-           └────────┬───────┘                │ own HeroCore
+           └────────┬───────┘                │ own browser
                     │                        │
           ┌─────────▼─────────┐    ┌─────────▼─────────┐
           │ TieredBrowserPool │    │  Dedicated Chrome  │
@@ -25,9 +25,9 @@ This document describes the internal architecture of Reader, helping contributor
     ┌───────────────┼───────────────┐
     │               │               │
 ┌───▼──────────┐ ┌──▼──────────┐ ┌──▼────────────┐
-│  Hero Config │ │  Orchestrator│ │  Formatters   │
-│ (TLS, DNS, etc.) │ │   Detection     │ │ (MD, HTML, etc) │
-└──────────────────┘ └─────────────────┘ └─────────────────┘
+│  Browser     │ │  Orchestrator│ │  Formatters   │
+│  Config      │ │   Detection  │ │ (MD, HTML, etc) │
+└──────────────┘ └─────────────┘ └─────────────────┘
 ```
 
 ## Directory Structure
@@ -41,8 +41,7 @@ src/
 ├── crawl-types.ts        # CrawlOptions, CrawlResult, etc.
 │
 ├── browser/
-│   ├── pool.ts           # BrowserPool - manages Hero instances
-│   ├── hero-config.ts    # Hero configuration (TLS, DNS, viewport)
+│   ├── pool.ts           # BrowserPool - manages Playwright instances
 │   └── types.ts          # IBrowserPool, PoolConfig, PoolStats
 │
 ├── cloudflare/
@@ -135,24 +134,24 @@ class Crawler {
 
 ### Browser Pool
 
-The `BrowserPool` class (`src/browser/pool.ts`) manages Hero instances:
+The `BrowserPool` class (`src/browser/pool.ts`) manages Playwright page instances:
 
 ```typescript
 class BrowserPool {
-  private instances: HeroInstance[];
-  private available: HeroInstance[];
+  private instances: PageInstance[];
+  private available: PageInstance[];
   private queue: PendingRequest[];
 
   async initialize(): Promise<void> { ... }
-  async acquire(): Promise<Hero> { ... }
-  async release(hero: Hero): Promise<void> { ... }
+  async acquire(): Promise<Page> { ... }
+  async release(page: Page): Promise<void> { ... }
 
-  async withBrowser<T>(fn: (hero: Hero) => Promise<T>): Promise<T> {
-    const hero = await this.acquire();
+  async withBrowser<T>(fn: (page: Page) => Promise<T>): Promise<T> {
+    const page = await this.acquire();
     try {
-      return await fn(hero);
+      return await fn(page);
     } finally {
-      await this.release(hero);
+      await this.release(page);
     }
   }
 }
@@ -160,7 +159,7 @@ class BrowserPool {
 
 **Pool lifecycle:**
 
-1. **Initialize** - Create `size` Hero instances
+1. **Initialize** - Create `size` Playwright page instances
 2. **Acquire** - Get available instance or queue the request
 3. **Use** - Execute scraping logic
 4. **Release** - Return to pool or recycle if stale
@@ -180,18 +179,18 @@ Detection happens in two phases:
 **1. Challenge Detection** (`src/cloudflare/detector.ts`):
 
 ```typescript
-async function detectChallenge(hero: Hero): Promise<ChallengeDetection> {
+async function detectChallenge(page: Page): Promise<ChallengeDetection> {
   // Check DOM for challenge elements
   const signals = [];
 
   // CSS selectors that indicate challenges
-  if (await hero.document.querySelector("#challenge-form")) {
+  if (await page.$("#challenge-form")) {
     signals.push({ type: "dom", selector: "#challenge-form" });
   }
 
   // Text patterns that indicate challenges
-  const bodyText = await hero.document.body.textContent;
-  if (bodyText.includes("checking your browser")) {
+  const bodyText = await page.textContent("body");
+  if (bodyText?.includes("checking your browser")) {
     signals.push({ type: "text", pattern: "checking your browser" });
   }
 
@@ -207,19 +206,19 @@ async function detectChallenge(hero: Hero): Promise<ChallengeDetection> {
 
 ```typescript
 async function waitForChallengeResolution(
-  hero: Hero,
+  page: Page,
   options: ResolutionOptions
 ): Promise<ResolutionResult> {
   const startTime = Date.now();
 
   while (Date.now() - startTime < options.maxWaitMs) {
     // Check if URL changed (redirect after challenge)
-    if ((await hero.url) !== options.initialUrl) {
+    if (page.url() !== options.initialUrl) {
       return { resolved: true, method: "redirect" };
     }
 
     // Check if challenge elements disappeared
-    const detection = await detectChallenge(hero);
+    const detection = await detectChallenge(page);
     if (!detection.isChallenge) {
       return { resolved: true, method: "element_removal" };
     }
@@ -255,15 +254,15 @@ scrape({ urls: ["https://example.com"], formats: ["markdown"] })
   │     │
   │     ├─► For each URL (controlled by p-limit):
   │     │     │
-  │     │     ├─► pool.withBrowser(async hero => {
+  │     │     ├─► pool.withBrowser(async page => {
   │     │     │     │
-  │     │     │     ├─► hero.goto(url)
+  │     │     │     ├─► page.goto(url)
   │     │     │     │
-  │     │     │     ├─► detectChallenge(hero)
+  │     │     │     ├─► detectChallenge(page)
   │     │     │     │     └─► Returns { isChallenge, type, signals }
   │     │     │     │
   │     │     │     ├─► if (isChallenge):
-  │     │     │     │     └─► waitForChallengeResolution(hero)
+  │     │     │     │     └─► waitForChallengeResolution(page)
   │     │     │     │
   │     │     │     ├─► Extract title, HTML
   │     │     │     │
@@ -298,7 +297,7 @@ crawl({ url: "https://example.com", depth: 2, scrape: true })
   │     │     │
   │     │     ├─► Dequeue next URL
   │     │     │
-  │     │     ├─► Fetch page with Hero
+  │     │     ├─► Fetch page with Playwright
   │     │     │
   │     │     ├─► Extract links via regex
   │     │     │
@@ -323,14 +322,14 @@ crawl({ url: "https://example.com", depth: 2, scrape: true })
 
 ## Design Decisions
 
-### Why Hero?
+### Why Playwright?
 
-[Ulixee Hero](https://ulixee.org/) was chosen for:
+Playwright was chosen for:
 
-1. **Stealth** - Advanced TLS fingerprinting and anti-detection
+1. **Stealth** - Compatible with fingerprint-generator, stealth scripts, and proxy-chain
 2. **Speed** - Optimized for headless automation
-3. **API** - Clean async/await interface
-4. **Stability** - Production-tested at scale
+3. **API** - Clean async/await interface with full browser control
+4. **Stability** - Production-tested at scale with broad community support
 
 ### Pool vs Per-Request Browsers
 
@@ -421,4 +420,4 @@ cd reader && npx vitest run
 
 - [Browser Pool](guides/browser-pool.md) - Deep dive into pool management
 - [Cloudflare Bypass](guides/cloudflare-bypass.md) - Understanding antibot bypass
-- [Production Server](deployment/production-server.md) - Shared Hero Core pattern
+- [Production Server](deployment/production-server.md) - Server deployment pattern

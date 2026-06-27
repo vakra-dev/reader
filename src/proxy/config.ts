@@ -3,16 +3,16 @@ import type { ProxyConfig } from "../types";
 /**
  * Create proxy URL from configuration
  *
- * Supports both datacenter and residential proxies.
- * For residential proxies, generates a sticky session ID.
+ * Supports both standard and premium proxies.
+ * For premium proxies, generates a sticky session ID.
  *
  * @param config - Proxy configuration
  * @returns Formatted proxy URL
  *
  * @example
- * // Datacenter proxy
+ * // Standard proxy
  * createProxyUrl({
- *   type: 'datacenter',
+ *   type: 'standard',
  *   username: 'user',
  *   password: 'pass',
  *   host: 'proxy.example.com',
@@ -26,10 +26,10 @@ export function createProxyUrl(config: ProxyConfig): string {
     return config.url;
   }
 
-  // Residential proxy with sticky session
-  if (config.type === "residential") {
+  // Premium proxy with sticky session
+  if (config.type === "premium") {
     // Generate unique session ID for sticky sessions
-    const sessionId = `hero_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const sessionId = `reader_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     // Format: customer-{username}_session-{sessionId}_country-{country}:{password}@{host}:{port}
     return `http://customer-${config.username}_session-${sessionId}_country-${
@@ -37,7 +37,7 @@ export function createProxyUrl(config: ProxyConfig): string {
     }:${config.password}@${config.host}:${config.port}`;
   }
 
-  // Datacenter proxy (simple authentication)
+  // Standard proxy (simple authentication)
   return `http://${config.username}:${config.password}@${config.host}:${config.port}`;
 }
 
@@ -51,6 +51,21 @@ export function createProxyUrl(config: ProxyConfig): string {
  * parseProxyUrl("http://user:pass@proxy.example.com:8080")
  * // Returns: { username: 'user', password: 'pass', host: 'proxy.example.com', port: 8080 }
  */
+/**
+ * Redact credentials from a proxy URL for logging. `http://user:pass@host:port`
+ * becomes `http://***@host:port`. Never log the raw URL -- it contains secrets.
+ */
+export function redactProxyUrl(proxyUrl: string | null): string {
+  if (!proxyUrl) return "direct";
+  try {
+    const u = new URL(proxyUrl);
+    const creds = u.username ? "***@" : "";
+    return `${u.protocol}//${creds}${u.host}`;
+  } catch {
+    return "<invalid-proxy-url>";
+  }
+}
+
 export function parseProxyUrl(url: string): ProxyConfig {
   try {
     const parsed = new URL(url);

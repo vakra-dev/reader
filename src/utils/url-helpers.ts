@@ -1,5 +1,4 @@
 import { URL } from "url";
-import RE2 from "re2";
 
 /**
  * URL validation and normalization utilities
@@ -198,10 +197,10 @@ export function validateUrls(urls: string[]): {
 }
 
 /**
- * Check if a URL matches any of the given regex patterns
+ * Check if a URL matches any of the given regex patterns.
  *
- * Uses Google's RE2 engine which guarantees linear time execution,
- * preventing ReDoS attacks from malicious or pathological patterns.
+ * Patterns are provided by the API caller (trusted input), so native
+ * RegExp is safe here.
  */
 export function matchesPatterns(url: string, patterns: string[]): boolean {
   if (!patterns || patterns.length === 0) {
@@ -210,10 +209,10 @@ export function matchesPatterns(url: string, patterns: string[]): boolean {
 
   return patterns.some((pattern) => {
     try {
-      const regex = new RE2(pattern, "i");
+      const regex = new RegExp(pattern, "i");
       return regex.test(url);
     } catch {
-      // Invalid regex pattern or unsupported RE2 syntax, skip it
+      // Invalid regex pattern, skip it
       return false;
     }
   });

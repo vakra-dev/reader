@@ -2,14 +2,6 @@
 
 Examples showing how to integrate Reader with AI frameworks, LLMs, and vector stores.
 
-## Prerequisites
-
-Start Ulixee Cloud in a separate terminal:
-
-```bash
-npx @ulixee/cloud start
-```
-
 ## Examples
 
 ### LLM Summarization

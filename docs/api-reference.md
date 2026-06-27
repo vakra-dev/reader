@@ -4,7 +4,7 @@ Complete API documentation for Reader.
 
 ## ReaderClient (Recommended)
 
-The recommended way to use Reader. Manages HeroCore lifecycle automatically, reuses connections efficiently, and auto-closes on process exit.
+The recommended way to use Reader. Manages the Playwright browser pool lifecycle automatically, reuses connections efficiently, and auto-closes on process exit.
 
 ```typescript
 import { ReaderClient } from "@vakra-dev/reader";
@@ -42,7 +42,7 @@ new ReaderClient(options?: ReaderClientOptions)
 | `verbose` | `boolean` | `false` | Enable verbose logging |
 | `showChrome` | `boolean` | `false` | Show browser window for debugging |
 | `browserPool` | `BrowserPoolConfig` | - | Browser pool configuration |
-| `proxyPools` | `ProxyPoolConfig` | - | Tiered proxy pools (datacenter + residential) |
+| `proxyPools` | `ProxyPoolConfig` | - | Tiered proxy pools (standard + premium) |
 | `proxies` | `ProxyConfig[]` | - | List of proxies to rotate through (legacy) |
 | `proxyRotation` | `"round-robin" \| "random"` | `"round-robin"` | Proxy rotation strategy |
 
@@ -50,8 +50,8 @@ new ReaderClient(options?: ReaderClientOptions)
 
 ```typescript
 interface ProxyPoolConfig {
-  datacenter?: ProxyConfig[];   // Fast, cheap - works for most sites
-  residential?: ProxyConfig[];  // Slower, anti-bot sites (Amazon, LinkedIn)
+  standard?: ProxyConfig[];   // datacenter proxies, fast, most sites
+  premium?: ProxyConfig[];   // residential proxies, anti-bot sites
 }
 ```
 
@@ -68,7 +68,7 @@ interface ProxyPoolConfig {
 
 #### start()
 
-Pre-initialize HeroCore. Called automatically on first scrape/crawl.
+Pre-initialize the browser pool. Called automatically on first scrape/crawl.
 
 ```typescript
 await reader.start(): Promise<void>
@@ -105,7 +105,7 @@ const session = await reader.browser(options?): Promise<BrowserSession>
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `proxy` | `ProxyConfig` | - | Proxy configuration |
-| `proxyTier` | `ProxyTier` | - | Proxy tier: `"datacenter"`, `"residential"`, `"auto"` |
+| `proxyTier` | `ProxyTier` | - | Proxy tier: `"standard"` or `"premium"` |
 | `showChrome` | `boolean` | `false` | Show browser window |
 | `timeoutMs` | `number` | `300000` | Session lifetime (auto-closes after) |
 | `verbose` | `boolean` | `false` | Enable verbose logging |
@@ -143,7 +143,7 @@ await reader.close(): Promise<void>
 
 ## Direct Functions (Advanced)
 
-For advanced use cases where you need custom HeroCore management, you can use the direct functions. Note that without `connectionToCore`, each call spawns a new HeroCore instance which is less efficient.
+For advanced use cases where you need direct function access, you can use the direct functions.
 
 ### scrape(options)
 
@@ -173,11 +173,11 @@ const result = await scrape({
 | `batchTimeoutMs` | `number` | No | `300000` | Total batch timeout |
 | `onProgress` | `ProgressCallback` | No | - | Progress callback function |
 | `proxy` | `ProxyConfig` | No | - | Proxy configuration |
-| `proxyTier` | `ProxyTier` | No | - | Proxy tier: `"datacenter"`, `"residential"`, `"auto"` |
+| `proxyTier` | `ProxyTier` | No | - | Proxy tier: `"standard"` or `"premium"` |
 | `waitForSelector` | `string` | No | - | CSS selector to wait for |
 | `verbose` | `boolean` | No | `false` | Enable verbose logging |
 | `showChrome` | `boolean` | No | `false` | Show browser window |
-| `connectionToCore` | `any` | No | - | Shared Hero Core connection |
+
 
 #### Returns
 
@@ -250,7 +250,7 @@ await reader.close();
 | `userAgent` | `string` | No | - | Custom user agent |
 | `verbose` | `boolean` | No | `false` | Enable verbose logging |
 | `showChrome` | `boolean` | No | `false` | Show browser window |
-| `connectionToCore` | `any` | No | - | Shared Hero Core connection |
+
 
 #### Returns
 
@@ -308,11 +308,10 @@ interface ScrapeOptions {
   batchTimeoutMs?: number;
   onProgress?: (progress: ProgressInfo) => void;
   proxy?: ProxyConfig;
-  proxyTier?: "datacenter" | "residential" | "auto";
+  proxyTier?: "standard" | "premium";
   waitForSelector?: string;
   verbose?: boolean;
   showChrome?: boolean;
-  connectionToCore?: any;
 }
 ```
 
@@ -334,7 +333,6 @@ interface CrawlOptions {
   userAgent?: string;
   verbose?: boolean;
   showChrome?: boolean;
-  connectionToCore?: any;
 }
 ```
 
@@ -343,7 +341,7 @@ interface CrawlOptions {
 ```typescript
 interface ProxyConfig {
   url?: string;
-  type?: "datacenter" | "residential";
+  type?: "standard" | "premium";
   host?: string;
   port?: number;
   username?: string;
@@ -484,7 +482,7 @@ interface ProgressInfo {
 
 ### BrowserPool
 
-Manages a pool of Hero browser instances for efficient scraping.
+Manages a pool of Playwright browser instances for efficient scraping.
 
 ```typescript
 import { BrowserPool } from "@vakra-dev/reader";
@@ -492,9 +490,9 @@ import { BrowserPool } from "@vakra-dev/reader";
 const pool = new BrowserPool({ size: 5 });
 await pool.initialize();
 
-const result = await pool.withBrowser(async (hero) => {
-  await hero.goto("https://example.com");
-  return await hero.document.title;
+const result = await pool.withBrowser(async (page) => {
+  await page.goto("https://example.com");
+  return await page.title();
 });
 
 await pool.shutdown();
@@ -529,7 +527,7 @@ await pool.initialize(): Promise<void>
 Execute a function with an acquired browser, automatically releasing it after.
 
 ```typescript
-await pool.withBrowser<T>(fn: (hero: Hero) => Promise<T>): Promise<T>
+await pool.withBrowser<T>(fn: (page: Page) => Promise<T>): Promise<T>
 ```
 
 ##### acquire()
@@ -537,7 +535,7 @@ await pool.withBrowser<T>(fn: (hero: Hero) => Promise<T>): Promise<T>
 Manually acquire a browser instance. Must be paired with `release()`.
 
 ```typescript
-const hero = await pool.acquire(): Promise<Hero>
+const page = await pool.acquire(): Promise<Page>
 ```
 
 ##### release(hero)
@@ -545,7 +543,7 @@ const hero = await pool.acquire(): Promise<Hero>
 Release a browser instance back to the pool.
 
 ```typescript
-await pool.release(hero: Hero): Promise<void>
+await pool.release(page: Page): Promise<void>
 ```
 
 ##### healthCheck()

@@ -3,16 +3,15 @@ import type { ProxyConfig, ProxyTier } from "./types";
 /**
  * Options for creating a browser session.
  *
- * A browser session launches a Hero-stealthed Chrome instance and returns
- * a CDP WebSocket URL. Users connect Playwright/Puppeteer via
- * `chromium.connectOverCDP(wsEndpoint)` and get full anti-bot stealth
- * (TLS fingerprinting, navigator/WebGL spoofing, WebRTC masking).
+ * A browser session launches a Chrome instance and returns a CDP WebSocket
+ * URL. Users connect Playwright/Puppeteer via `chromium.connectOverCDP(wsEndpoint)`
+ * and get anti-bot protections (WebRTC masking, proxy routing, stealth scripts).
  */
 export interface BrowserOptions {
   /** Proxy configuration (single proxy — use proxyTier for pool-based) */
   proxy?: ProxyConfig;
 
-  /** Proxy tier selection (default: "auto") */
+  /** Proxy tier selection: "standard" (default) or "premium" */
   proxyTier?: ProxyTier;
 
   /** Show Chrome browser window (default: false) */
@@ -37,7 +36,7 @@ export interface BrowserOptions {
  * ```typescript
  * import { chromium } from 'playwright';
  *
- * const session = await reader.browser({ proxyTier: 'stealth' });
+ * const session = await reader.browser({ proxyTier: 'premium' });
  * const browser = await chromium.connectOverCDP(session.wsEndpoint);
  * const page = browser.contexts()[0].pages()[0];
  *
@@ -66,9 +65,6 @@ export interface BrowserSession {
  * Not part of the public API.
  */
 export interface BrowserSessionInternalOptions extends BrowserOptions {
-  /** Connection to shared HeroCore instance */
-  connectionToCore?: any;
-
   /** Proxy resolver callback (provided by ReaderClient) */
   resolveProxy?: (tier: ProxyTier | undefined) => ProxyConfig | undefined;
 }

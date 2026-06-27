@@ -10,7 +10,7 @@ Thank you for your interest in contributing to Reader! This document provides gu
 - **npm** for package management
 - **Git**
 
-> **Note:** Always run scripts with Node.js (`npx tsx` or `node`) as Hero has ESM compatibility issues with other runtimes.
+> **Note:** Always run scripts with Node.js (`npx tsx` or `node`).
 
 ### Getting Started
 
@@ -53,8 +53,7 @@ src/
 ├── crawl-types.ts        # TypeScript types for crawling
 │
 ├── browser/
-│   ├── pool.ts           # BrowserPool - manages Hero instances
-│   ├── hero-config.ts    # Hero configuration
+│   ├── pool.ts           # BrowserPool - manages Playwright browser instances
 │   └── types.ts          # Pool types
 │
 ├── cloudflare/

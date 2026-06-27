@@ -20,8 +20,6 @@ import {
 } from "../errors.js";
 import type { PlaywrightPool } from "../../browser/playwright-pool.js";
 
-const MIN_CONTENT_LENGTH = 100;
-
 /**
  * Playwright engine configuration
  */
@@ -150,37 +148,6 @@ export class PlaywrightEngine implements Engine {
       throw new EngineTimeoutError("playwright" as EngineName, Date.now() - startTime);
     }
 
-    // Detect Cloudflare challenge and wait for it to resolve.
-    // Cloudflare Turnstile/managed challenges load JS that auto-solves and
-    // redirects. With the stealth plugin active, Turnstile typically resolves
-    // in 10-30s. We give it up to the remaining time from the engine timeout.
-    const title = await page.title();
-    if (title === "Just a moment..." || title === "Attention Required! | Cloudflare") {
-      logger?.debug("[playwright] Cloudflare challenge detected, waiting for resolution...");
-      const elapsed = Date.now() - startTime;
-      const remaining = Math.max(timeoutMs - elapsed, 5000);
-      try {
-        // Wait for the page title to change away from the challenge page
-        await page.waitForFunction(
-          () =>
-            document.title !== "Just a moment..." &&
-            document.title !== "Attention Required! | Cloudflare",
-          { timeout: remaining }
-        );
-        // After challenge resolves, wait for the real page to settle
-        try {
-          await page.waitForLoadState("networkidle", { timeout: 10000 });
-        } catch {
-          // OK if networkidle times out
-        }
-        logger?.debug(
-          `[playwright] Cloudflare challenge resolved, new title: ${await page.title()}`
-        );
-      } catch {
-        logger?.debug("[playwright] Cloudflare challenge did not resolve in time");
-      }
-    }
-
     if (abortSignal?.aborted) {
       throw new EngineTimeoutError("playwright" as EngineName, Date.now() - startTime);
     }
@@ -201,15 +168,16 @@ export class PlaywrightEngine implements Engine {
     const finalUrl = page.url();
     const statusCode = response?.status() ?? 200;
 
-    // Validate content length
+    // Reject error status codes
+    if (statusCode >= 400) {
+      throw new EngineError("playwright" as EngineName, `HTTP ${statusCode} for ${finalUrl}`);
+    }
+
+    // Reject blank content
     const textContent = this.extractText(html);
-    if (textContent.length < MIN_CONTENT_LENGTH) {
-      logger?.debug(`[playwright] Insufficient content: ${textContent.length} chars`);
-      throw new InsufficientContentError(
-        "playwright" as EngineName,
-        textContent.length,
-        MIN_CONTENT_LENGTH
-      );
+    if (textContent.length === 0) {
+      logger?.debug(`[playwright] Blank content returned for ${finalUrl}`);
+      throw new InsufficientContentError("playwright" as EngineName, 0, 1);
     }
 
     // Capture screenshot if requested (must happen before page closes)
@@ -255,8 +223,8 @@ export const playwrightEngine = new PlaywrightEngine();
 /**
  * Map proxy tier to pool tier.
  */
-function resolvePoolTier(proxyTier: string | undefined): "datacenter" | "residential" | "direct" {
-  if (proxyTier === "residential") return "residential";
+function resolvePoolTier(proxyTier: string | undefined): "standard" | "premium" | "direct" {
+  if (proxyTier === "premium") return "premium";
   if (proxyTier === "direct") return "direct";
-  return "datacenter";
+  return "standard";
 }

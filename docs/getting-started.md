@@ -7,7 +7,7 @@ This guide walks you through setting up Reader, verifying your installation, and
 - **Node.js >= 18** (v22 recommended)
 - **npm** package manager
 
-> **Note:** The Hero browser runtime requires Node.js. Always run your scripts with `node` or `npx tsx`.
+> **Note:** Reader requires Node.js. Always run your scripts with `node` or `npx tsx`.
 
 ## Installation
 
@@ -305,13 +305,16 @@ npx reader crawl https://example.com -d 2 --scrape
 
 ### "Chrome/Chromium not found"
 
-Hero automatically downloads Chrome on first run. If this fails:
+Install the Playwright Chromium browser:
 
 ```bash
-# Manually install Chrome dependencies (Ubuntu/Debian)
-sudo apt-get install -y chromium-browser
+npx playwright install chromium
+```
 
-# Or use the system Chrome
+Or install system Chrome dependencies (Ubuntu/Debian) and point to it:
+
+```bash
+sudo apt-get install -y chromium-browser
 export CHROME_PATH=/usr/bin/chromium-browser
 ```
 

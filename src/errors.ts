@@ -147,7 +147,7 @@ export class CloudflareError extends ReaderError {
 
   constructor(challengeType: string, options?: { url?: string; cause?: Error }) {
     super(
-      `Cloudflare ${challengeType} challenge not resolved. Consider using a residential proxy or increasing timeout.`,
+      `Cloudflare ${challengeType} challenge not resolved. Consider using a premium proxy or increasing timeout.`,
       ReaderErrorCode.CLOUDFLARE_CHALLENGE,
       {
         ...options,

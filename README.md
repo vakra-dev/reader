@@ -37,11 +37,11 @@ Because production grade web scraping isn't about rendering a page and convertin
 | **Browser architecture** | Managing browser instances at scale, not one-off scripts            |
 | **Anti-bot bypass**      | Cloudflare, Turnstile, JS challenges, they all block naive scrapers |
 | **TLS fingerprinting**   | Real browsers have fingerprints. Puppeteer doesn't. Sites know.     |
-| **Proxy infrastructure** | Datacenter vs residential, rotation strategies, sticky sessions     |
+| **Proxy infrastructure** | Standard vs premium, rotation strategies, sticky sessions     |
 | **Resource management**  | Browser pooling, memory limits, graceful recycling                  |
 | **Reliability**          | Rate limiting, retries, timeouts, caching, graceful degradation     |
 
-I built **Reader**, a production-grade web scraping engine on top of [Ulixee Hero](https://ulixee.org/), a headless browser designed for exactly this.
+I built **Reader**, a production-grade web scraping engine on top of Playwright, with stealth and anti-detection built in from the ground up.
 
 ## The Solution
 
@@ -89,7 +89,7 @@ All the hard stuff (browser pooling, anti-bot bypass, proxy rotation, retries) h
 - **Browser Pool** - Auto-recycling, health monitoring, tiered proxy pools
 - **Concurrent Scraping** - Parallel URL processing with progress tracking
 - **Website Crawling** - BFS link discovery with depth/page limits
-- **Tiered Proxies** - Datacenter and residential pools with auto-escalation and health tracking
+- **Tiered Proxies** - Standard and premium proxy pools with health tracking
 
 ## Installation
 
@@ -99,10 +99,10 @@ npm install @vakra-dev/reader
 
 **Requirements:** Node.js >= 18
 
-> **Apple Silicon (M1/M2/M3):** Hero's bundled Chrome binary isn't available for arm64. Point to your system Chrome:
+> **First run:** Playwright bundles Chromium for all platforms. Install it with:
 >
 > ```bash
-> export CHROME_139_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+> npx playwright install chromium
 > ```
 
 ## Quick Start
@@ -237,7 +237,7 @@ const result = await reader.scrape({
   urls: ["https://example.com"],
   formats: ["markdown"],
   proxy: {
-    type: "residential",
+    type: "premium",
     host: "proxy.example.com",
     port: 8080,
     username: "username",
@@ -251,24 +251,24 @@ await reader.close();
 
 ### With Tiered Proxy Pools
 
-Configure datacenter (fast, cheap) and residential (anti-bot) proxy tiers. Reader auto-escalates from datacenter to residential when sites block:
+Configure standard (datacenter, fast) and premium (residential, anti-bot) proxy tiers:
 
 ```typescript
 import { ReaderClient } from "@vakra-dev/reader";
 
 const reader = new ReaderClient({
   proxyPools: {
-    datacenter: [
+    standard: [
       { url: "http://user:pass@dc-proxy1:8080" },
       { url: "http://user:pass@dc-proxy2:8080" },
     ],
-    residential: [{ url: "http://user:pass@res-proxy1:8080" }],
+    premium: [{ url: "http://user:pass@res-proxy1:8080" }],
   },
 });
 
 const result = await reader.scrape({
   urls: ["https://example.com"],
-  proxyTier: "auto", // datacenter first, escalate to residential on block
+  proxyMode: "standard", // or "premium" for anti-bot sites
 });
 
 await reader.close();
@@ -277,8 +277,8 @@ await reader.close();
 Or via environment variables:
 
 ```bash
-PROXY_DATACENTER=http://user:pass@dc1:8080,http://user:pass@dc2:8080
-PROXY_RESIDENTIAL=http://user:pass@res1:8080
+PROXY_STANDARD=http://user:pass@dc1:8080,http://user:pass@dc2:8080
+PROXY_PREMIUM=http://user:pass@res1:8080
 ```
 
 ### With Browser Pool Configuration
@@ -424,7 +424,7 @@ npx reader browser stop <sessionId>
 
 ### `ReaderClient`
 
-The recommended way to use Reader. Manages HeroCore lifecycle automatically.
+The recommended way to use Reader. Manages the Playwright browser pool lifecycle automatically.
 
 ```typescript
 import { ReaderClient } from "@vakra-dev/reader";
@@ -452,7 +452,7 @@ await reader.close();
 | `verbose`       | `boolean`           | `false`         | Enable verbose logging                           |
 | `showChrome`    | `boolean`           | `false`         | Show browser window for debugging                |
 | `browserPool`   | `BrowserPoolConfig` | `undefined`     | Browser pool configuration (size, recycling)     |
-| `proxyPools`    | `ProxyPoolConfig`   | `undefined`     | Tiered proxy pools (datacenter + residential)    |
+| `proxyPools`    | `ProxyPoolConfig`   | `undefined`     | Tiered proxy pools (standard + premium)    |
 | `proxies`       | `ProxyConfig[]`     | `undefined`     | Array of proxies for rotation (legacy)           |
 | `proxyRotation` | `string`            | `"round-robin"` | Rotation strategy: `"round-robin"` or `"random"` |
 
@@ -472,7 +472,7 @@ await reader.close();
 | `scrape(options)`   | Scrape one or more URLs                            |
 | `crawl(options)`    | Crawl a website to discover pages                  |
 | `browser(options?)` | Launch a stealthed browser session (CDP WebSocket) |
-| `start()`           | Pre-initialize HeroCore (optional)                 |
+| `start()`           | Pre-initialize browser pool (optional)             |
 | `isReady()`         | Check if client is initialized                     |
 | `close()`           | Close client and release resources                 |
 
@@ -492,7 +492,7 @@ Scrape one or more URLs. Can be used directly or via `ReaderClient`.
 | `batchConcurrency` | `number`                      | No       | `1`            | Number of URLs to process in parallel                           |
 | `batchTimeoutMs`   | `number`                      | No       | `300000`       | Total timeout for entire batch operation                        |
 | `proxy`            | `ProxyConfig`                 | No       | -              | Proxy configuration object                                      |
-| `proxyTier`        | `ProxyTier`                   | No       | -              | Proxy tier: `"datacenter"`, `"residential"`, `"auto"`           |
+| `proxyTier`        | `ProxyTier`                   | No       | -              | Proxy tier: `"standard"` or `"premium"`           |
 | `onProgress`       | `function`                    | No       | -              | Progress callback: `({ completed, total, currentUrl }) => void` |
 | `verbose`          | `boolean`                     | No       | `false`        | Enable verbose logging                                          |
 | `showChrome`       | `boolean`                     | No       | `false`        | Show Chrome window for debugging                                |
@@ -548,7 +548,6 @@ Crawl a website to discover pages.
 | `userAgent`         | `string`                      | No       | -              | Custom user agent string                        |
 | `verbose`           | `boolean`                     | No       | `false`        | Enable verbose logging                          |
 | `showChrome`        | `boolean`                     | No       | `false`        | Show Chrome window for debugging                |
-| `connectionToCore`  | `any`                         | No       | -              | Connection to shared Hero Core (for production) |
 
 **Returns:** `Promise<CrawlResult>`
 
@@ -580,7 +579,7 @@ Launch a stealthed Chrome and return a CDP WebSocket URL for Playwright/Puppetee
 | Option       | Type          | Required | Default  | Description                                           |
 | ------------ | ------------- | -------- | -------- | ----------------------------------------------------- |
 | `proxy`      | `ProxyConfig` | No       | -        | Proxy configuration                                   |
-| `proxyTier`  | `ProxyTier`   | No       | -        | Proxy tier: `"datacenter"`, `"residential"`, `"auto"` |
+| `proxyTier`  | `ProxyTier`   | No       | -        | Proxy tier: `"standard"` or `"premium"` |
 | `showChrome` | `boolean`     | No       | `false`  | Show browser window                                   |
 | `timeoutMs`  | `number`      | No       | `300000` | Session lifetime (auto-closes after)                  |
 | `verbose`    | `boolean`     | No       | `false`  | Enable verbose logging                                |
@@ -607,7 +606,7 @@ interface BrowserSession {
 | Option     | Type                            | Required | Default | Description                                             |
 | ---------- | ------------------------------- | -------- | ------- | ------------------------------------------------------- |
 | `url`      | `string`                        | No       | -       | Full proxy URL (takes precedence over other fields)     |
-| `type`     | `"datacenter" \| "residential"` | No       | -       | Proxy type                                              |
+| `type`     | `"standard" \| "premium"` | No       | -       | Proxy type                                              |
 | `host`     | `string`                        | No       | -       | Proxy host                                              |
 | `port`     | `number`                        | No       | -       | Proxy port                                              |
 | `username` | `string`                        | No       | -       | Proxy username                                          |
@@ -624,8 +623,8 @@ import { ReaderClient } from "@vakra-dev/reader";
 // Create once at startup
 const reader = new ReaderClient({
   proxyPools: {
-    datacenter: [{ url: "http://user:pass@dc-proxy:8080" }],
-    residential: [{ url: "http://user:pass@res-proxy:8080" }],
+    standard: [{ url: "http://user:pass@dc-proxy:8080" }],
+    premium: [{ url: "http://user:pass@res-proxy:8080" }],
   },
 });
 
@@ -640,17 +639,17 @@ process.on("SIGTERM", () => reader.close());
 
 ### Anti-Bot Bypass
 
-Reader uses [Ulixee Hero](https://ulixee.org/), a headless browser with advanced anti-detection:
+Reader uses Playwright with stealth enhancements for advanced anti-detection:
 
-1. **TLS Fingerprinting** - Emulates real Chrome browser fingerprints via MITM proxy
+1. **Fingerprint Generation** - Randomized browser fingerprints via fingerprint-generator
 2. **Navigator Spoofing** - `webdriver=false`, device memory, hardware concurrency
-3. **DNS over TLS** - Uses Cloudflare DNS (1.1.1.1) to mimic Chrome behavior
+3. **Stealth Scripts** - Injected scripts that patch automation indicators
 4. **WebRTC IP Masking** - Prevents IP leaks through WebRTC connections
-5. **WebGL/Canvas Fingerprinting** - Randomized rendering signatures
+5. **Proxy Chaining** - Traffic routed through proxy-chain for IP management
 
 ### Browser Pool
 
-- **Tiered Proxy Pools** - Separate datacenter and residential pools with auto-escalation
+- **Tiered Proxy Pools** - Separate standard and premium proxy pools
 - **Auto-Recycling** - Browsers recycled after 100 requests or 30 minutes
 - **Health Tracking** - Auto-benches failed proxies for 5 minutes, revives on recovery
 - **Per-Proxy Concurrency** - Limits concurrent requests per proxy URL (default: 2)
