@@ -1,3 +1,4 @@
+import pLimit from "p-limit";
 import { parseHTML } from "linkedom";
 import {
   resolveUrl,
@@ -8,24 +9,23 @@ import {
   shouldIncludeUrl,
 } from "./utils/url-helpers";
 import { fetchRobotsTxt, isUrlAllowed, type RobotsRules } from "./utils/robots-parser";
-import { rateLimit } from "./utils/rate-limiter";
 import { createLogger } from "./utils/logger";
 import { scrape } from "./scraper";
 import type { CrawlOptions, CrawlResult, CrawlUrl, CrawlMetadata } from "./crawl-types";
-import type { ScrapeResult } from "./types";
+import type { ScrapeResult, WebsiteScrapeResult } from "./types";
 
 /**
- * Crawler class for discovering and optionally scraping pages.
+ * Crawler class for discovering and scraping pages concurrently.
  *
- * Discovery and scraping both go through the scraper, which handles
- * Hero, proxy escalation, and timeouts. The crawler owns BFS traversal,
- * link extraction, deduplication, robots.txt, and rate limiting.
+ * BFS traversal with concurrent page fetching. Each page is scraped once
+ * for both link discovery and content extraction (single pass).
  */
 export class Crawler {
   private options: CrawlOptions;
   private visited: Set<string> = new Set();
   private queue: Array<{ url: string; depth: number }> = [];
   private urls: CrawlUrl[] = [];
+  private scrapedPages: WebsiteScrapeResult[] = [];
   private logger = createLogger("crawler");
   private robotsRules: RobotsRules | null = null;
 
@@ -34,9 +34,9 @@ export class Crawler {
       depth: 1,
       maxPages: 20,
       scrape: false,
-      delayMs: 1000,
+      delayMs: 200,
       formats: ["markdown", "html"],
-      scrapeConcurrency: 2,
+      scrapeConcurrency: 3,
       verbose: false,
       showChrome: false,
       ...options,
@@ -48,6 +48,9 @@ export class Crawler {
    */
   async crawl(): Promise<CrawlResult> {
     const startTime = Date.now();
+    const maxPages = this.options.maxPages ?? 20;
+    const concurrency = this.options.scrapeConcurrency ?? 3;
+    const limit = pLimit(concurrency);
 
     // Fetch robots.txt rules
     this.robotsRules = await fetchRobotsTxt(this.options.url);
@@ -62,37 +65,56 @@ export class Crawler {
       this.logger.warn(`Seed URL blocked by robots.txt: ${this.options.url}`);
     }
 
-    // BFS crawl
-    while (this.queue.length > 0 && this.urls.length < (this.options.maxPages ?? 20)) {
+    // BFS crawl with concurrent fetching
+    while (this.queue.length > 0 && this.urls.length < maxPages) {
       if (this.options.timeoutMs && Date.now() - startTime > this.options.timeoutMs) {
         this.logger.warn(`Crawl timed out after ${this.options.timeoutMs}ms`);
         break;
       }
 
-      const item = this.queue.shift()!;
-      const urlKey = getUrlKey(item.url);
+      // Grab a batch of items from the queue (up to concurrency limit)
+      const remaining = maxPages - this.urls.length;
+      const batchSize = Math.min(this.queue.length, concurrency, remaining);
+      const batch: Array<{ url: string; depth: number }> = [];
 
-      if (this.visited.has(urlKey)) {
-        continue;
+      while (batch.length < batchSize && this.queue.length > 0) {
+        const item = this.queue.shift()!;
+        const urlKey = getUrlKey(item.url);
+        if (this.visited.has(urlKey)) continue;
+        this.visited.add(urlKey);
+        batch.push(item);
       }
 
-      // Fetch page via scraper
-      const result = await this.fetchPage(item.url);
+      if (batch.length === 0) break;
 
-      if (result) {
+      // Fetch all pages in the batch concurrently
+      const results = await Promise.all(
+        batch.map((item) =>
+          limit(async () => {
+            const result = await this.fetchPage(item.url);
+            return { item, result };
+          })
+        )
+      );
+
+      // Process results: collect URLs and extract links
+      for (const { item, result } of results) {
+        if (!result) continue;
+        if (this.urls.length >= maxPages) break;
+
         this.urls.push(result.crawlUrl);
-        this.visited.add(urlKey);
 
-        // Extract links if not at max depth
+        // Store scraped content if scrape mode is on
+        if (this.options.scrape && result.scraped) {
+          this.scrapedPages.push(result.scraped);
+        }
+
+        // Extract links for BFS if not at max depth
         if (item.depth < (this.options.depth ?? 1)) {
           const links = this.extractLinks(result.html, item.url, item.depth + 1);
           this.queue.push(...links);
         }
       }
-
-      // Rate limit
-      const delay = this.robotsRules?.crawlDelay || (this.options.delayMs ?? 1000);
-      await rateLimit(delay);
     }
 
     const metadata: CrawlMetadata = {
@@ -102,10 +124,20 @@ export class Crawler {
       seedUrl: this.options.url,
     };
 
-    // Optionally scrape all discovered URLs for content
+    // Build scraped result from collected pages
     let scraped: ScrapeResult | undefined;
-    if (this.options.scrape) {
-      scraped = await this.scrapeDiscoveredUrls();
+    if (this.options.scrape && this.scrapedPages.length > 0) {
+      scraped = {
+        data: this.scrapedPages,
+        batchMetadata: {
+          totalUrls: this.scrapedPages.length,
+          successfulUrls: this.scrapedPages.length,
+          failedUrls: 0,
+          scrapedAt: new Date().toISOString(),
+          totalDuration: Date.now() - startTime,
+          errors: [],
+        },
+      };
     }
 
     return {
@@ -116,18 +148,21 @@ export class Crawler {
   }
 
   /**
-   * Fetch a single page for discovery using the scraper.
-   *
-   * Calls scrape() with onlyMainContent=false so link extraction gets
-   * the full page HTML. The scraper handles Hero, proxy escalation,
-   * and timeouts internally.
+   * Fetch a single page. Returns both discovery data (URL, title, raw HTML
+   * for link extraction) and scraped content (markdown/html) in one pass.
    */
-  private async fetchPage(url: string): Promise<{ crawlUrl: CrawlUrl; html: string } | null> {
+  private async fetchPage(url: string): Promise<{
+    crawlUrl: CrawlUrl;
+    html: string;
+    scraped?: WebsiteScrapeResult;
+  } | null> {
     try {
+      const formats = this.options.scrape ? this.options.formats || ["markdown", "html"] : [];
+
       const result = await scrape({
         urls: [url],
-        formats: [], // We only need rawHtml for discovery
-        onlyMainContent: false,
+        formats,
+        onlyMainContent: this.options.scrape ? true : false,
         proxy: this.options.proxy,
         proxyTier: this.options.proxyTier,
         timeoutMs: this.options.timeoutMs,
@@ -153,6 +188,7 @@ export class Crawler {
           description: page.metadata.website?.description ?? null,
         },
         html: page.rawHtml,
+        scraped: this.options.scrape ? page : undefined,
       };
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -231,30 +267,6 @@ export class Crawler {
     });
 
     return links;
-  }
-
-  /**
-   * Scrape all discovered URLs for content.
-   */
-  private async scrapeDiscoveredUrls(): Promise<ScrapeResult> {
-    const urls = this.urls.map((u) => u.url);
-
-    return scrape({
-      urls,
-      formats: this.options.formats || ["markdown", "html"],
-      batchConcurrency: this.options.scrapeConcurrency || 2,
-      proxy: this.options.proxy,
-      proxyTier: this.options.proxyTier,
-      userAgent: this.options.userAgent,
-      verbose: this.options.verbose,
-      showChrome: this.options.showChrome,
-      playwrightPool: this.options.playwrightPool,
-      proxyGate: this.options.proxyGate,
-      healthTracker: this.options.healthTracker,
-      resolveProxy: this.options.resolveProxy,
-      removeAds: this.options.removeAds,
-      removeBase64Images: this.options.removeBase64Images,
-    });
   }
 }
 
