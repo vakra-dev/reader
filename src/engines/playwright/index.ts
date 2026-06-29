@@ -126,11 +126,26 @@ export class PlaywrightEngine implements Engine {
   ): Promise<EngineResult> {
     const timeoutMs = options.timeoutMs || this.config.maxTimeout;
 
-    // Navigate with domcontentloaded (fast, doesn't depend on all resources)
-    const response = await page.goto(url, {
+    // Race navigation against abort signal so client disconnects cancel
+    // the page.goto immediately instead of waiting for the full timeout.
+    const abortPromise = abortSignal
+      ? new Promise<never>((_, reject) => {
+          if (abortSignal.aborted) reject(new EngineTimeoutError("playwright" as EngineName, 0));
+          abortSignal.addEventListener(
+            "abort",
+            () =>
+              reject(new EngineTimeoutError("playwright" as EngineName, Date.now() - startTime)),
+            { once: true }
+          );
+        })
+      : null;
+
+    const navigate = page.goto(url, {
       waitUntil: "domcontentloaded",
       timeout: timeoutMs,
     });
+
+    const response = abortPromise ? await Promise.race([navigate, abortPromise]) : await navigate;
 
     if (abortSignal?.aborted) {
       throw new EngineTimeoutError("playwright" as EngineName, Date.now() - startTime);
@@ -142,10 +157,6 @@ export class PlaywrightEngine implements Engine {
     } catch {
       // networkidle timeout is OK — some sites never fully settle
       logger?.debug("[playwright] networkidle timeout, continuing");
-    }
-
-    if (abortSignal?.aborted) {
-      throw new EngineTimeoutError("playwright" as EngineName, Date.now() - startTime);
     }
 
     if (abortSignal?.aborted) {

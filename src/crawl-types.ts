@@ -67,6 +67,9 @@ export interface CrawlOptions {
   /** Show Chrome window (default: false) */
   showChrome?: boolean;
 
+  /** Abort signal for cancelling in-flight crawls */
+  abortSignal?: AbortSignal;
+
   /**
    * Playwright browser pool (internal, provided by ReaderClient).
    * Typed as `unknown` to avoid a type cycle.

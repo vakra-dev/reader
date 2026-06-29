@@ -53,13 +53,21 @@ function mockRes(): { res: http.ServerResponse; captured: () => CapturedResponse
   let responseHeaders: Record<string, string> = {};
   let bodyChunks: string[] = [];
 
+  const listeners: Record<string, Array<() => void>> = {};
   const fake = {
+    writableEnded: false,
     writeHead(code: number, headers?: Record<string, string>) {
       statusCode = code;
       if (headers) responseHeaders = headers;
     },
     end(data?: string) {
       if (data) bodyChunks.push(data);
+      fake.writableEnded = true;
+      (listeners["finish"] || []).forEach((cb) => cb());
+    },
+    on(event: string, cb: () => void) {
+      (listeners[event] ??= []).push(cb);
+      return fake;
     },
   };
 
@@ -122,7 +130,9 @@ describe("DaemonServer POST / dispatch", () => {
     expect(out.statusCode).toBe(200);
     expect(out.body.success).toBe(true);
     expect(out.body.data).toEqual(scrapeResult);
-    expect(mockClient.scrape).toHaveBeenCalledWith({ urls: ["https://example.com"] });
+    expect(mockClient.scrape).toHaveBeenCalledWith(
+      expect.objectContaining({ urls: ["https://example.com"] }),
+    );
   });
 
   // 2. action=crawl calls client.crawl and returns result
@@ -142,7 +152,9 @@ describe("DaemonServer POST / dispatch", () => {
     expect(out.statusCode).toBe(200);
     expect(out.body.success).toBe(true);
     expect(out.body.data).toEqual(crawlResult);
-    expect(mockClient.crawl).toHaveBeenCalledWith({ url: "https://example.com", depth: 2 });
+    expect(mockClient.crawl).toHaveBeenCalledWith(
+      expect.objectContaining({ url: "https://example.com", depth: 2 }),
+    );
   });
 
   // 3. action=status returns pool stats

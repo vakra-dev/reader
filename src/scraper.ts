@@ -196,6 +196,7 @@ export class Scraper {
           url: scrapeTargetUrl,
           options: effectiveOptions,
           logger: this.logger,
+          abortSignal: this.options.abortSignal,
         });
 
       let engineResult;

@@ -172,6 +172,7 @@ export class Crawler {
         proxyGate: this.options.proxyGate,
         healthTracker: this.options.healthTracker,
         resolveProxy: this.options.resolveProxy,
+        abortSignal: this.options.abortSignal,
       });
 
       if (result.data.length === 0) {

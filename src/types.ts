@@ -186,6 +186,9 @@ export interface ScrapeOptions {
   /** Show Chrome window (default: false) */
   showChrome?: boolean;
 
+  /** Abort signal for cancelling in-flight scrapes (e.g. on client disconnect) */
+  abortSignal?: AbortSignal;
+
   /** Browser pool configuration (passed from ReaderClient) */
   browserPool?: BrowserPoolConfig;
 
@@ -423,6 +426,7 @@ export const DEFAULT_OPTIONS: Omit<
   | "hardDeadlineMs"
   | "blockDetection"
   | "urlRewriters"
+  | "abortSignal"
 > & {
   proxy?: ProxyConfig;
   proxyTier?: ProxyTier;

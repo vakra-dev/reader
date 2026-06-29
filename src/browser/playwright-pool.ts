@@ -156,9 +156,10 @@ export class ChromeInstance {
 
   /**
    * Execute fn with a fresh Playwright Page. Acquires an internal tab slot;
-   * at most maxTabs calls run concurrently.
+   * at most maxTabs calls run concurrently. A hard timeout guarantees the
+   * slot is always released, even if fn hangs (proxy stall, DNS hang, etc.).
    */
-  async withPage<T>(fn: (page: PlaywrightPage) => Promise<T>): Promise<T> {
+  async withPage<T>(fn: (page: PlaywrightPage) => Promise<T>, timeoutMs = 90_000): Promise<T> {
     if (this.state === "closed" || this.state === "retired") {
       throw new Error(`ChromeInstance: cannot withPage on ${this.state} browser`);
     }
@@ -177,10 +178,26 @@ export class ChromeInstance {
       const page = await this.pwContext.newPage();
 
       try {
-        return await fn(page);
+        // Hard timeout: if fn hangs, reject and force-close the page.
+        // This prevents pLimit slots from being held forever.
+        const result = await Promise.race([
+          fn(page),
+          new Promise<never>((_, reject) => {
+            setTimeout(
+              () => reject(new Error(`withPage hard timeout after ${timeoutMs}ms`)),
+              timeoutMs
+            );
+          }),
+        ]);
+        return result;
       } finally {
+        // Timeout page.close() to prevent hung CDP connections from
+        // blocking slot release.
         try {
-          await page.close();
+          await Promise.race([
+            page.close(),
+            new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
+          ]);
         } catch {
           /* swallow */
         }
@@ -439,9 +456,17 @@ export class ChromeInstance {
     }
   }
 
-  private async drainLimit(): Promise<void> {
+  private async drainLimit(timeoutMs = 60_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
     while (this.limit.activeCount > 0 || this.limit.pendingCount > 0) {
-      await new Promise((r) => setImmediate(r));
+      if (Date.now() > deadline) {
+        this.logger.warn(
+          { active: this.limit.activeCount, pending: this.limit.pendingCount },
+          "drainLimit timed out, force-closing"
+        );
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 100));
     }
   }
 }

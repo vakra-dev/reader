@@ -347,15 +347,28 @@ export class DaemonServer {
       return;
     }
 
+    // Abort in-flight work if the client disconnects (e.g. reader-api timeout).
+    // Without this, orphaned scrapes hold Chrome tab slots for work nobody
+    // is waiting for. We check socket.destroyed rather than req 'close' event
+    // because 'close' fires after body consumption in normal flow too.
+    const abortController = new AbortController();
+    const checkDisconnect = setInterval(() => {
+      if (req.socket?.destroyed && !res.writableEnded) {
+        abortController.abort();
+        clearInterval(checkDisconnect);
+      }
+    }, 1_000);
+    res.on("finish", () => clearInterval(checkDisconnect));
+
     // Track in-flight requests for graceful shutdown
     this.activeRequests++;
     try {
       switch (request.action) {
         case "scrape":
-          await this.handleScrape(res, request.options);
+          await this.handleScrape(res, request.options, abortController.signal);
           break;
         case "crawl":
-          await this.handleCrawl(res, request.options);
+          await this.handleCrawl(res, request.options, abortController.signal);
           break;
         case "status":
           this.handleStatus(res);
@@ -389,26 +402,34 @@ export class DaemonServer {
   /**
    * Handle scrape request
    */
-  private async handleScrape(res: http.ServerResponse, options: ScrapeOptions): Promise<void> {
+  private async handleScrape(
+    res: http.ServerResponse,
+    options: ScrapeOptions,
+    abortSignal?: AbortSignal
+  ): Promise<void> {
     if (!this.client) {
       this.sendResponse(res, 500, { success: false, error: "Client not initialized" });
       return;
     }
 
-    const result = await this.client.scrape(options);
+    const result = await this.client.scrape({ ...options, abortSignal });
     this.sendResponse<ScrapeResult>(res, 200, { success: true, data: result });
   }
 
   /**
    * Handle crawl request
    */
-  private async handleCrawl(res: http.ServerResponse, options: CrawlOptions): Promise<void> {
+  private async handleCrawl(
+    res: http.ServerResponse,
+    options: CrawlOptions,
+    abortSignal?: AbortSignal
+  ): Promise<void> {
     if (!this.client) {
       this.sendResponse(res, 500, { success: false, error: "Client not initialized" });
       return;
     }
 
-    const result = await this.client.crawl(options);
+    const result = await this.client.crawl({ ...options, abortSignal });
     this.sendResponse<CrawlResult>(res, 200, { success: true, data: result });
   }
 
