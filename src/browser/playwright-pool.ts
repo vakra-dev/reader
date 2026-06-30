@@ -175,6 +175,16 @@ export class ChromeInstance {
         throw new Error("ChromeInstance: browser became unavailable while waiting for tab slot");
       }
 
+      const pageStart = Date.now();
+      this.logger.info(
+        {
+          proxy: redactProxy(this.proxyUrl),
+          active: this.limit.activeCount,
+          pending: this.limit.pendingCount,
+        },
+        "withPage: tab acquired"
+      );
+
       const page = await this.pwContext.newPage();
 
       try {
@@ -183,21 +193,35 @@ export class ChromeInstance {
         const result = await Promise.race([
           fn(page),
           new Promise<never>((_, reject) => {
-            setTimeout(
-              () => reject(new Error(`withPage hard timeout after ${timeoutMs}ms`)),
-              timeoutMs
-            );
+            setTimeout(() => {
+              this.logger.error(
+                { proxy: redactProxy(this.proxyUrl), timeoutMs, elapsed: Date.now() - pageStart },
+                `withPage: HARD TIMEOUT after ${timeoutMs}ms`
+              );
+              reject(new Error(`withPage hard timeout after ${timeoutMs}ms`));
+            }, timeoutMs);
           }),
         ]);
+        this.logger.info(
+          { proxy: redactProxy(this.proxyUrl), duration: Date.now() - pageStart },
+          `withPage: completed (${Date.now() - pageStart}ms)`
+        );
         return result;
       } finally {
         // Timeout page.close() to prevent hung CDP connections from
         // blocking slot release.
+        const closeStart = Date.now();
         try {
-          await Promise.race([
-            page.close(),
-            new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
+          const closed = await Promise.race([
+            page.close().then(() => true),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5_000)),
           ]);
+          if (!closed) {
+            this.logger.warn(
+              { proxy: redactProxy(this.proxyUrl), elapsed: Date.now() - closeStart },
+              "withPage: page.close() timed out after 5s"
+            );
+          }
         } catch {
           /* swallow */
         }

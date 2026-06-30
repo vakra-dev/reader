@@ -174,12 +174,10 @@ export class Scraper {
 
       const currentProxyUrl = effectiveOptions.proxy?.url ?? null;
 
-      if (this.options.verbose) {
-        this.logger.info(
-          `[scraper] ${url} using tier=${effectiveOptions.proxyTier ?? "standard"} ` +
-            `proxy=${redactProxyUrl(currentProxyUrl)}`
-        );
-      }
+      this.logger.info(
+        `[scraper] ${url} using tier=${effectiveOptions.proxyTier ?? "standard"} ` +
+          `proxy=${redactProxyUrl(currentProxyUrl)}`
+      );
 
       // Create orchestrator
       const orchestrator = new EngineOrchestrator({
@@ -216,9 +214,9 @@ export class Scraper {
         throw err;
       }
 
-      if (this.options.verbose) {
-        this.logger.info(`[scraper] ${url} scraped in ${engineResult.duration}ms`);
-      }
+      this.logger.info(
+        `[scraper] ${url} scraped in ${engineResult.duration}ms (status=${engineResult.statusCode})`
+      );
 
       // Detect JSON responses
       const jsonPayload = detectJsonPayload(engineResult.html, engineResult.statusCode);

@@ -347,15 +347,29 @@ export class DaemonServer {
       return;
     }
 
+    // Extract scrape URL for logging
+    const opts = ("options" in request ? request.options : null) as Record<string, unknown> | null;
+    const scrapeUrl = (opts?.urls as string[])?.[0] ?? (opts?.url as string) ?? "n/a";
+    const requestStart = Date.now();
+
+    // Log incoming request
+    if (request.action !== "status") {
+      logger.info(
+        { action: request.action, url: scrapeUrl, active: this.activeRequests + 1 },
+        `request received: ${request.action} ${scrapeUrl}`
+      );
+    }
+
     // Abort in-flight work if the client disconnects (e.g. reader-api timeout).
-    // Without this, orphaned scrapes hold Chrome tab slots for work nobody
-    // is waiting for. We check socket.destroyed rather than req 'close' event
-    // because 'close' fires after body consumption in normal flow too.
     const abortController = new AbortController();
     const checkDisconnect = setInterval(() => {
       if (req.socket?.destroyed && !res.writableEnded) {
         abortController.abort();
         clearInterval(checkDisconnect);
+        logger.warn(
+          { action: request.action, url: scrapeUrl, elapsed: Date.now() - requestStart },
+          `client disconnected, aborting: ${scrapeUrl}`
+        );
       }
     }, 1_000);
     res.on("finish", () => clearInterval(checkDisconnect));
@@ -388,7 +402,30 @@ export class DaemonServer {
         default:
           this.sendResponse(res, 400, { success: false, error: "Unknown action" });
       }
+
+      // Log successful completion
+      if (request.action !== "status") {
+        logger.info(
+          {
+            action: request.action,
+            url: scrapeUrl,
+            duration: Date.now() - requestStart,
+            active: this.activeRequests - 1,
+          },
+          `request completed: ${request.action} ${scrapeUrl} (${Date.now() - requestStart}ms)`
+        );
+      }
     } catch (error: any) {
+      logger.error(
+        {
+          action: request.action,
+          url: scrapeUrl,
+          duration: Date.now() - requestStart,
+          error: error.message,
+          code: error.code,
+        },
+        `request failed: ${request.action} ${scrapeUrl} - ${error.message}`
+      );
       this.sendResponse(res, 500, {
         success: false,
         error: error.message,
