@@ -151,11 +151,17 @@ export class PlaywrightEngine implements Engine {
       throw new EngineTimeoutError("playwright" as EngineName, Date.now() - startTime);
     }
 
-    // Wait for network to settle — equivalent to Hero's waitForPaintingStable
+    // Capture SSR HTML before React/Next.js hydration runs. If hydration
+    // crashes (common with Next.js apps), the error boundary replaces the
+    // DOM with a generic error message. The SSR HTML is the last-known-good
+    // content before that happens.
+    const ssrHtml = await page.content();
+
+    // Wait for network to settle
     try {
       await page.waitForLoadState("networkidle", { timeout: Math.min(timeoutMs, 10000) });
     } catch {
-      // networkidle timeout is OK — some sites never fully settle
+      // networkidle timeout is OK -- some sites never fully settle
       logger?.debug("[playwright] networkidle timeout, continuing");
     }
 
@@ -174,8 +180,15 @@ export class PlaywrightEngine implements Engine {
       }
     }
 
-    // Extract content
-    const html = await page.content();
+    // Extract final content (post-hydration)
+    let html = await page.content();
+
+    // If a JS framework's error boundary replaced the DOM with a generic
+    // error page, fall back to the pre-hydration SSR HTML.
+    if (this.isFrameworkErrorPage(html) && ssrHtml.length > html.length) {
+      logger?.info("[playwright] Framework error page detected, using SSR HTML fallback");
+      html = ssrHtml;
+    }
     const finalUrl = page.url();
     const statusCode = response?.status() ?? 200;
 
@@ -219,6 +232,23 @@ export class PlaywrightEngine implements Engine {
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  /**
+   * Detect known JS framework error boundary pages that replace real content.
+   */
+  private isFrameworkErrorPage(html: string): boolean {
+    const lower = html.toLowerCase();
+    return (
+      // Next.js error boundary
+      lower.includes("application error: a client-side exception has occurred") ||
+      // Next.js digest error
+      lower.includes("there was an error while hydrating") ||
+      // Nuxt.js error page
+      (lower.includes("__nuxt") && lower.includes("nuxt-error")) ||
+      // Generic React error boundary
+      (lower.includes("error boundary") && lower.includes("chunk") && !lower.includes("<article"))
+    );
   }
 
   isAvailable(): boolean {
