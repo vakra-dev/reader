@@ -24,12 +24,17 @@ import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import pLimit from "p-limit";
-import { anonymizeProxy, closeAnonymizedProxy } from "proxy-chain";
+import type { Server as ProxyChainServer } from "proxy-chain";
 import { FingerprintGenerator, type BrowserFingerprintWithHeaders } from "fingerprint-generator";
 import { FingerprintInjector } from "fingerprint-injector";
 import { createLogger, type Logger } from "../utils/logger.js";
 import type { ProxyHealthTracker } from "../proxy/health-tracker.js";
-import { findChromePath, buildChromeArgs, CHROME_LAUNCH_TIMEOUT_MS } from "./shared.js";
+import {
+  findChromePath,
+  buildChromeArgs,
+  createProxyTunnel,
+  CHROME_LAUNCH_TIMEOUT_MS,
+} from "./shared.js";
 
 // Lazy-loaded Playwright types — we import dynamically to avoid hard dep at parse time.
 type PlaywrightBrowser = import("playwright-core").Browser;
@@ -99,7 +104,7 @@ export class ChromeInstance {
   private chromeProcess: ChildProcess | null = null;
   private pwBrowser: PlaywrightBrowser | null = null;
   private pwContext: PlaywrightBrowserContext | null = null;
-  private anonymizedProxyUrl: string | null = null;
+  private proxyChainServer: ProxyChainServer | null = null;
   private userDataDir: string | null = null;
   private wsEndpoint: string | null = null;
   private fingerprint: BrowserFingerprintWithHeaders["fingerprint"] | null = null;
@@ -159,7 +164,7 @@ export class ChromeInstance {
    * at most maxTabs calls run concurrently. A hard timeout guarantees the
    * slot is always released, even if fn hangs (proxy stall, DNS hang, etc.).
    */
-  async withPage<T>(fn: (page: PlaywrightPage) => Promise<T>, timeoutMs = 90_000): Promise<T> {
+  async withPage<T>(fn: (page: PlaywrightPage) => Promise<T>, timeoutMs = 60_000): Promise<T> {
     if (this.state === "closed" || this.state === "retired") {
       throw new Error(`ChromeInstance: cannot withPage on ${this.state} browser`);
     }
@@ -285,12 +290,13 @@ export class ChromeInstance {
     try {
       this.logger.debug({ proxy: redactProxy(this.proxyUrl) }, "launching Chrome");
 
-      // Set up proxy via proxy-chain (handles auth transparently, preserves TLS)
+      // Set up proxy tunnel with keepAlive disabled (see createProxyTunnel).
       let chromeProxyArg: string | undefined;
 
       if (this.proxyUrl) {
-        this.anonymizedProxyUrl = await anonymizeProxy(this.proxyUrl);
-        chromeProxyArg = this.anonymizedProxyUrl;
+        const tunnel = await createProxyTunnel(this.proxyUrl);
+        this.proxyChainServer = tunnel.server;
+        chromeProxyArg = tunnel.url;
       }
 
       // Generate fingerprint once per ChromeInstance (cached across relaunches)
@@ -461,10 +467,10 @@ export class ChromeInstance {
       this.chromeProcess = null;
     }
 
-    // Stop proxy-chain anonymized proxy
-    if (this.anonymizedProxyUrl) {
-      await closeAnonymizedProxy(this.anonymizedProxyUrl, true).catch(() => {});
-      this.anonymizedProxyUrl = null;
+    // Stop proxy-chain server
+    if (this.proxyChainServer) {
+      await this.proxyChainServer.close(true).catch(() => {});
+      this.proxyChainServer = null;
     }
 
     // Remove temp profile

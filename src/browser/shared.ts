@@ -141,3 +141,44 @@ export function buildChromeArgs(opts: ChromeArgsOptions): string[] {
 }
 
 export const CHROME_LAUNCH_TIMEOUT_MS = 15_000;
+
+// ─── Proxy tunnel with no connection pooling ─────────────────────
+
+import http from "http";
+import { Server as ProxyChainServer } from "proxy-chain";
+
+/**
+ * Create a local proxy server that forwards to an upstream proxy
+ * WITHOUT connection pooling.
+ *
+ * Node 19+ changed http.globalAgent to keepAlive: true by default.
+ * proxy-chain's anonymizeProxy() passes agent: undefined to http.request(),
+ * which falls back to globalAgent, which pools TCP connections to the
+ * upstream proxy. Those pooled connections go stale after idle periods
+ * (upstream drops them via NAT/firewall timeout), causing Chrome requests
+ * to hang on dead sockets.
+ *
+ * This function creates a Server with an explicit http.Agent({ keepAlive: false })
+ * so every CONNECT to the upstream gets a fresh TCP connection.
+ *
+ * @returns { url, close } - the local proxy URL and a cleanup function
+ */
+export async function createProxyTunnel(
+  upstreamProxyUrl: string
+): Promise<{ url: string; server: ProxyChainServer }> {
+  const agent = new http.Agent({ keepAlive: false });
+  const server = new ProxyChainServer({
+    port: 0,
+    host: "127.0.0.1",
+    prepareRequestFunction: () => ({
+      requestAuthentication: false,
+      upstreamProxyUrl,
+      httpAgent: agent,
+    }),
+  });
+  await server.listen();
+  return {
+    url: `http://127.0.0.1:${server.port}`,
+    server,
+  };
+}

@@ -26,12 +26,17 @@ import { randomUUID } from "crypto";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { anonymizeProxy, closeAnonymizedProxy } from "proxy-chain";
+import type { Server as ProxyChainServer } from "proxy-chain";
 import { FingerprintGenerator } from "fingerprint-generator";
 import { FingerprintInjector } from "fingerprint-injector";
 import { createProxyUrl } from "./proxy/config";
 import { createLogger } from "./utils/logger";
-import { findChromePath, buildChromeArgs, CHROME_LAUNCH_TIMEOUT_MS } from "./browser/shared";
+import {
+  findChromePath,
+  buildChromeArgs,
+  createProxyTunnel,
+  CHROME_LAUNCH_TIMEOUT_MS,
+} from "./browser/shared";
 import type { BrowserSession, BrowserSessionInternalOptions } from "./browser-types";
 
 const logger = createLogger("browser-session");
@@ -62,17 +67,16 @@ export async function createBrowserSession(
   const proxyConfig = options.proxy ?? options.resolveProxy?.(options.proxyTier);
   const proxyUrl = proxyConfig ? createProxyUrl(proxyConfig) : undefined;
 
-  // proxy-chain handles auth transparently (no TLS breakage, no "Not Secure")
-  let anonymizedUrl: string | undefined;
+  // proxy-chain tunnel with keepAlive disabled (see createProxyTunnel)
+  let proxyChainServer: ProxyChainServer | null = null;
   let chromeProxyArg: string | undefined;
 
   if (proxyUrl) {
-    anonymizedUrl = await anonymizeProxy(proxyUrl);
-    chromeProxyArg = anonymizedUrl;
+    const tunnel = await createProxyTunnel(proxyUrl);
+    proxyChainServer = tunnel.server;
+    chromeProxyArg = tunnel.url;
     if (verbose) {
-      logger.info(
-        `Proxy anonymized: ${proxyUrl.replace(/\/\/[^@]+@/, "//***@")} -> ${anonymizedUrl}`
-      );
+      logger.info(`Proxy tunnel: ${proxyUrl.replace(/\/\/[^@]+@/, "//***@")} -> ${tunnel.url}`);
     }
   }
 
@@ -158,8 +162,8 @@ export async function createBrowserSession(
     } catch {
       /* ignore */
     }
-    if (anonymizedUrl) {
-      await closeAnonymizedProxy(anonymizedUrl, true).catch(() => {});
+    if (proxyChainServer) {
+      await proxyChainServer.close(true).catch(() => {});
     }
     try {
       rmSync(userDataDir, { recursive: true, force: true });
@@ -272,9 +276,9 @@ export async function createBrowserSession(
       internalPwBrowser = null;
     }
 
-    // Stop proxy-chain anonymized proxy
-    if (anonymizedUrl) {
-      await closeAnonymizedProxy(anonymizedUrl, true).catch(() => {});
+    // Stop proxy-chain server
+    if (proxyChainServer) {
+      await proxyChainServer.close(true).catch(() => {});
     }
 
     // Clean up temp profile directory (delayed so Chrome can release locks)
