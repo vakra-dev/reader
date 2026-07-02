@@ -108,6 +108,7 @@ export class ChromeInstance {
   private userDataDir: string | null = null;
   private wsEndpoint: string | null = null;
   private fingerprint: BrowserFingerprintWithHeaders["fingerprint"] | null = null;
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
   readonly ready: Promise<void>;
   private resolveReady!: () => void;
@@ -195,10 +196,11 @@ export class ChromeInstance {
       try {
         // Hard timeout: if fn hangs, reject and force-close the page.
         // This prevents pLimit slots from being held forever.
+        let hardTimer: ReturnType<typeof setTimeout> | null = null;
         const result = await Promise.race([
           fn(page),
           new Promise<never>((_, reject) => {
-            setTimeout(() => {
+            hardTimer = setTimeout(() => {
               this.logger.error(
                 { proxy: redactProxy(this.proxyUrl), timeoutMs, elapsed: Date.now() - pageStart },
                 `withPage: HARD TIMEOUT after ${timeoutMs}ms`
@@ -207,6 +209,7 @@ export class ChromeInstance {
             }, timeoutMs);
           }),
         ]);
+        if (hardTimer !== null) clearTimeout(hardTimer);
         this.logger.info(
           { proxy: redactProxy(this.proxyUrl), duration: Date.now() - pageStart },
           `withPage: completed (${Date.now() - pageStart}ms)`
@@ -427,6 +430,7 @@ export class ChromeInstance {
       });
 
       this.state = "active";
+      this.startHeartbeat();
       this.resolveReady();
 
       this.logger.debug(
@@ -441,7 +445,41 @@ export class ChromeInstance {
     }
   }
 
+  /**
+   * Send a lightweight CDP command every 30s to keep the WebSocket alive.
+   * Without this, the TCP connection between Playwright and Chrome dies
+   * silently after ~2 hours of idle (Linux tcp_keepalive_time default).
+   */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeatInterval = setInterval(async () => {
+      if (this.state !== "active" || !this.pwBrowser) {
+        this.stopHeartbeat();
+        return;
+      }
+      try {
+        const cdp = await this.pwBrowser.newBrowserCDPSession();
+        await cdp.send("Browser.getVersion");
+        await cdp.detach();
+      } catch {
+        this.logger.warn(
+          { proxy: redactProxy(this.proxyUrl) },
+          "CDP heartbeat failed, connection may be dead"
+        );
+      }
+    }, 30_000);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+  }
+
   private async cleanup(): Promise<void> {
+    this.stopHeartbeat();
+
     // Disconnect Playwright
     if (this.pwBrowser) {
       try {
