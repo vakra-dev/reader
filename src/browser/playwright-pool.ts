@@ -18,6 +18,7 @@
  * adds credentials and tunnels to the upstream proxy.
  */
 
+import http from "http";
 import { spawn, type ChildProcess } from "child_process";
 import { createInterface } from "readline";
 import { mkdtempSync, rmSync } from "fs";
@@ -95,6 +96,7 @@ export class ChromeInstance {
 
   private state: "launching" | "active" | "retired" | "closed" = "launching";
   private totalPages = 0;
+  private lastPageAt = Date.now();
   private recycling = false;
   private readonly limit: ReturnType<typeof pLimit>;
   private readonly logger: Logger;
@@ -182,6 +184,7 @@ export class ChromeInstance {
       }
 
       const pageStart = Date.now();
+      this.lastPageAt = pageStart;
       this.logger.info(
         {
           proxy: redactProxy(this.proxyUrl),
@@ -191,7 +194,12 @@ export class ChromeInstance {
         "withPage: tab acquired"
       );
 
-      const page = await this.pwContext.newPage();
+      const page = await Promise.race([
+        this.pwContext.newPage(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("newPage() timed out after 15s")), 15_000)
+        ),
+      ]);
 
       try {
         // Hard timeout: if fn hangs, reject and force-close the page.
@@ -332,9 +340,24 @@ export class ChromeInstance {
         stdio: ["ignore", "pipe", "pipe"],
       });
 
-      // Extract WebSocket URL from Chrome stderr
+      // Extract WebSocket URL from Chrome stderr.
+      // Listeners are removed after the promise settles to prevent accumulation
+      // across relaunches (each launch adds listeners to the same ChildProcess
+      // event emitter; without cleanup they pile up and leak memory).
+      const errorListener = (err: Error) => {
+        clearTimeout(launchTimeout);
+        rejectLaunch(new Error(`Failed to launch Chrome: ${err.message}`));
+      };
+      const exitListener = (code: number | null) => {
+        clearTimeout(launchTimeout);
+        rejectLaunch(new Error(`Chrome exited with code ${code} before ready`));
+      };
+      let rejectLaunch: (err: Error) => void;
+      let launchTimeout: ReturnType<typeof setTimeout>;
+
       this.wsEndpoint = await new Promise<string>((resolve, reject) => {
-        const launchTimeout = setTimeout(() => {
+        rejectLaunch = reject;
+        launchTimeout = setTimeout(() => {
           reject(new Error("Timed out waiting for Chrome to start"));
         }, CHROME_LAUNCH_TIMEOUT_MS);
 
@@ -350,15 +373,13 @@ export class ChromeInstance {
           });
         }
 
-        this.chromeProcess!.on("error", (err) => {
-          clearTimeout(launchTimeout);
-          reject(new Error(`Failed to launch Chrome: ${err.message}`));
-        });
-
-        this.chromeProcess!.on("exit", (code) => {
-          clearTimeout(launchTimeout);
-          reject(new Error(`Chrome exited with code ${code} before ready`));
-        });
+        this.chromeProcess!.on("error", errorListener);
+        this.chromeProcess!.on("exit", exitListener);
+      }).finally(() => {
+        if (this.chromeProcess) {
+          this.chromeProcess.removeListener("error", errorListener);
+          this.chromeProcess.removeListener("exit", exitListener);
+        }
       });
 
       // Connect Playwright via CDP (standard, no stealth wrapper).
@@ -419,13 +440,39 @@ export class ChromeInstance {
         /* non-fatal */
       }
 
-      // Handle Chrome crashes
+      // Handle Chrome crashes (process exit)
       this.chromeProcess!.on("exit", () => {
         if (this.state === "active") {
-          this.logger.warn({ proxy: redactProxy(this.proxyUrl) }, "Chrome process crashed");
+          this.logger.warn(
+            { proxy: redactProxy(this.proxyUrl) },
+            "Chrome process exited unexpectedly"
+          );
           this.state = "closed";
+          this.stopHeartbeat();
           this.pwBrowser = null;
           this.pwContext = null;
+        }
+      });
+
+      // Handle Playwright disconnection (CDP WebSocket drop)
+      this.pwBrowser.on("disconnected", () => {
+        if (this.state === "active" && !this.recycling) {
+          this.logger.warn(
+            { proxy: redactProxy(this.proxyUrl) },
+            "Playwright disconnected, relaunching"
+          );
+          this.stopHeartbeat();
+          this.recycling = true;
+          void this.relaunch()
+            .catch((err) => {
+              this.logger.error(
+                { err, proxy: redactProxy(this.proxyUrl) },
+                "disconnect relaunch failed"
+              );
+            })
+            .finally(() => {
+              this.recycling = false;
+            });
         }
       });
 
@@ -446,28 +493,82 @@ export class ChromeInstance {
   }
 
   /**
-   * Send a lightweight CDP command every 30s to keep the WebSocket alive.
-   * Without this, the TCP connection between Playwright and Chrome dies
-   * silently after ~2 hours of idle (Linux tcp_keepalive_time default).
+   * Every 30s: ping Chrome's HTTP debug endpoint and check idle time.
+   *
+   * Health check: GET /json/version with 5s timeout. If Chrome's internal
+   * server is frozen (known Chromium bug after hours of idle), the PID
+   * stays alive but the debug port hangs. Detect and relaunch.
+   *
+   * Idle retirement: if no pages have been opened for 30 minutes and no
+   * tabs are active, proactively recycle Chrome before it can freeze.
    */
   private startHeartbeat(): void {
     this.stopHeartbeat();
-    this.heartbeatInterval = setInterval(async () => {
-      if (this.state !== "active" || !this.pwBrowser) {
+    const IDLE_RETIRE_MS = 30 * 60 * 1000; // 30 minutes
+
+    this.heartbeatInterval = setInterval(() => {
+      if (this.state !== "active" || !this.wsEndpoint || this.recycling) {
         this.stopHeartbeat();
         return;
       }
-      try {
-        const cdp = await this.pwBrowser.newBrowserCDPSession();
-        await cdp.send("Browser.getVersion");
-        await cdp.detach();
-      } catch {
-        this.logger.warn(
-          { proxy: redactProxy(this.proxyUrl) },
-          "CDP heartbeat failed, connection may be dead"
+
+      // Idle retirement: recycle Chrome before it freezes
+      const idleMs = Date.now() - this.lastPageAt;
+      if (idleMs >= IDLE_RETIRE_MS && this.limit.activeCount === 0) {
+        this.logger.info(
+          { proxy: redactProxy(this.proxyUrl), idleMinutes: Math.round(idleMs / 60_000) },
+          "Chrome idle too long, recycling proactively"
         );
+        this.triggerRelaunch("idle retirement");
+        return;
       }
+
+      // Health check: ping Chrome's debug port via HTTP
+      const port = new URL(this.wsEndpoint).port;
+      const req = http.get(`http://127.0.0.1:${port}/json/version`, { timeout: 5_000 }, (res) => {
+        let body = "";
+        res.on("data", (c: Buffer) => {
+          body += c;
+        });
+        res.on("end", () => {
+          if (!body) {
+            this.logger.error(
+              { proxy: redactProxy(this.proxyUrl) },
+              "Chrome debug port returned empty response"
+            );
+            this.triggerRelaunch("empty health response");
+          }
+        });
+      });
+      req.on("timeout", () => {
+        req.destroy();
+        this.logger.error(
+          { proxy: redactProxy(this.proxyUrl) },
+          "Chrome debug port unresponsive (5s timeout)"
+        );
+        this.triggerRelaunch("health check timeout");
+      });
+      req.on("error", () => {
+        this.logger.error(
+          { proxy: redactProxy(this.proxyUrl) },
+          "Chrome debug port connection error"
+        );
+        this.triggerRelaunch("health check error");
+      });
     }, 30_000);
+  }
+
+  private triggerRelaunch(reason: string): void {
+    this.stopHeartbeat();
+    this.recycling = true;
+    this.logger.warn({ proxy: redactProxy(this.proxyUrl), reason }, "triggering Chrome relaunch");
+    void this.relaunch()
+      .catch((err) => {
+        this.logger.error({ err, proxy: redactProxy(this.proxyUrl) }, "relaunch failed");
+      })
+      .finally(() => {
+        this.recycling = false;
+      });
   }
 
   private stopHeartbeat(): void {
@@ -491,18 +592,43 @@ export class ChromeInstance {
       this.pwContext = null;
     }
 
-    // Kill Chrome
+    // Kill Chrome: SIGTERM first, SIGKILL after 5s if it doesn't die
     if (this.chromeProcess?.pid && !this.chromeProcess.killed) {
+      const pid = this.chromeProcess.pid;
+      const proc = this.chromeProcess;
+      this.chromeProcess = null;
+
       try {
         if (process.platform !== "win32") {
-          process.kill(-this.chromeProcess.pid, "SIGTERM");
+          process.kill(-pid, "SIGTERM");
         } else {
-          this.chromeProcess.kill("SIGTERM");
+          proc.kill("SIGTERM");
         }
       } catch {
-        /* swallow */
+        /* already dead */
       }
-      this.chromeProcess = null;
+
+      // Force-kill after 5s if still alive (Crawlee pattern)
+      const killTimer = setTimeout(() => {
+        try {
+          if (!proc.killed) {
+            this.logger.warn(
+              { proxy: redactProxy(this.proxyUrl) },
+              "Chrome did not exit after SIGTERM, sending SIGKILL"
+            );
+            if (process.platform !== "win32") {
+              process.kill(-pid, "SIGKILL");
+            } else {
+              proc.kill("SIGKILL");
+            }
+          }
+        } catch {
+          /* already dead */
+        }
+      }, 5_000);
+
+      // Clear timer if process exits on its own
+      proc.once("exit", () => clearTimeout(killTimer));
     }
 
     // Stop proxy-chain server
