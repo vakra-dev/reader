@@ -287,6 +287,7 @@ export class ChromeInstance {
 
     this.state = "launching";
     this.totalPages = 0;
+    this.lastPageAt = Date.now();
 
     (this as { ready: Promise<void> }).ready = new Promise<void>((resolve, reject) => {
       this.resolveReady = resolve;
