@@ -247,7 +247,7 @@ export class ReaderClient {
 
       this.pool = new PlaywrightPool({
         tiers: tierConfigs,
-        maxTabsPerBrowser: 10,
+        maxTabsPerBrowser: parseInt(process.env.MAX_TABS_PER_BROWSER || "20", 10),
         retireAfterPages: this.options.browserPool?.retireAfterPages ?? 100,
         showChrome: this.options.showChrome,
         userAgent: this.options.userAgent,
@@ -424,6 +424,10 @@ export class ReaderClient {
    */
   isReady(): boolean {
     return this.initialized && !this.closed;
+  }
+
+  getPoolStats(): import("./browser/playwright-pool.js").PoolStatsSnapshot | null {
+    return this.pool?.getStats() ?? null;
   }
 
   /**

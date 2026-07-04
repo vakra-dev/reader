@@ -73,6 +73,8 @@ export interface ChromeInstanceStats {
   proxyUrl: string | null;
   state: "launching" | "active" | "retired" | "closed";
   activeTabs: number;
+  pendingTabs: number;
+  maxTabs: number;
   totalPages: number;
 }
 
@@ -125,7 +127,7 @@ export class ChromeInstance {
     logger?: Logger;
   }) {
     this.proxyUrl = options.proxyUrl;
-    this.maxTabs = options.maxTabs ?? 2;
+    this.maxTabs = options.maxTabs ?? 20;
     this.retireAfterPages = options.retireAfterPages ?? 100;
     this.showChrome = options.showChrome ?? false;
     this.userAgent = options.userAgent;
@@ -158,6 +160,8 @@ export class ChromeInstance {
       proxyUrl: this.proxyUrl,
       state: this.state,
       activeTabs: this.limit.activeCount,
+      pendingTabs: this.limit.pendingCount,
+      maxTabs: this.maxTabs,
       totalPages: this.totalPages,
     };
   }

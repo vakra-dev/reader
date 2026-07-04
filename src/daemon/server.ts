@@ -318,6 +318,13 @@ export class DaemonServer {
       return;
     }
 
+    // Pressure: per-browser load metrics for smart routing
+    if (method === "GET" && url === "/pressure") {
+      if (!this.checkAuth(req, res)) return;
+      this.handlePressure(res);
+      return;
+    }
+
     // --- POST / (existing action-based RPC) ---
 
     if (method !== "POST" || url !== "/") {
@@ -484,6 +491,34 @@ export class DaemonServer {
       activeRequests: this.activeRequests,
     };
     this.sendResponse<DaemonStatus>(res, 200, { success: true, data: status });
+  }
+
+  private handlePressure(res: http.ServerResponse): void {
+    const poolStats = this.client?.getPoolStats();
+    let activeTabs = 0;
+    let pendingTabs = 0;
+    let capacity = 0;
+
+    const tiers =
+      poolStats?.tiers.map((t) => {
+        const browsers = t.browsers.map((b) => {
+          activeTabs += b.activeTabs;
+          pendingTabs += b.pendingTabs;
+          if (b.state === "active") capacity += b.maxTabs;
+          return {
+            activeTabs: b.activeTabs,
+            pendingTabs: b.pendingTabs,
+            maxTabs: b.maxTabs,
+            state: b.state,
+          };
+        });
+        return { tier: t.tier, browsers };
+      }) ?? [];
+
+    this.sendResponse(res, 200, {
+      success: true,
+      data: { activeTabs, pendingTabs, capacity, activeRequests: this.activeRequests, tiers },
+    });
   }
 
   /**
