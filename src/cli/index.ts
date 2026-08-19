@@ -68,8 +68,8 @@ program
   .description("Start the reader daemon server")
   .option(
     "-p, --port <n>",
-    `Port to listen on (default: ${DEFAULT_DAEMON_PORT})`,
-    String(DEFAULT_DAEMON_PORT)
+    `Port to listen on (env: PORT, default: ${DEFAULT_DAEMON_PORT})`,
+    process.env.PORT ?? String(DEFAULT_DAEMON_PORT)
   )
   // The daemon now binds 1 browser per configured proxy URL, so --direct-pool-size
   // only controls the size of the *direct* sub-pool that's used when no proxies

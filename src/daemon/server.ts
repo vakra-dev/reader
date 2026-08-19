@@ -568,8 +568,11 @@ export class DaemonServer {
     }
     this.browserSessions.clear();
 
-    // 4. Close client and pool
-    await this.stop();
+    // 4. Close client and pool (with timeout to prevent hanging)
+    await Promise.race([
+      this.stop(),
+      new Promise((resolve) => setTimeout(resolve, 15_000).unref()),
+    ]).catch((err) => logger.warn({ err }, "Error during pool close"));
 
     logger.info("Graceful shutdown complete");
   }
