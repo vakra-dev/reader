@@ -33,7 +33,6 @@ The following are in scope:
 
 - The `@vakra-dev/reader` npm package
 - The Reader CLI tool
-- The Reader Cloud API (`cloud.reader.dev`)
 
 The following are out of scope:
 

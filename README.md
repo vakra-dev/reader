@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="https://docs.reader.dev">Docs</a> · <a href="https://docs.reader.dev/home/examples">Examples</a> · <a href="https://discord.gg/6tjkq7J5WV">Discord</a>
+  <a href="https://reader.dev/docs">Docs</a> · <a href="https://reader.dev/docs/getting-started/examples">Examples</a>
 </p>
 
 <p align="center">
@@ -106,31 +106,6 @@ npm install @vakra-dev/reader
 > ```
 
 ## Quick Start
-
-### Cloud (Fastest)
-
-Get an API key at [console.reader.dev](https://console.reader.dev) and start scraping immediately:
-
-```typescript
-import { ReaderClient } from "@vakra-dev/reader-js";
-
-const reader = new ReaderClient({ apiKey: process.env.READER_API_KEY });
-
-const result = await reader.read({ url: "https://example.com" });
-if (result.kind === "scrape") {
-  console.log(result.data.markdown);
-}
-```
-
-```bash
-npm install @vakra-dev/reader-js
-```
-
-See the [cloud docs](https://docs.reader.dev) for the full API reference.
-
-### Self-Hosted
-
-Install the reader engine and run scraping on your own infrastructure:
 
 ### Basic Scrape
 
@@ -697,11 +672,11 @@ sudo apt-get install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
 
 This is the same requirement that Puppeteer and Playwright have on headless Linux. macOS, Windows, and Linux desktops already have these libraries.
 
-For Docker and production deployment guides, see the [deployment documentation](https://docs.reader.dev/documentation/guides/deployment).
+For Docker and production deployment guides, see the [deployment documentation](https://reader.dev/docs/guides/deployment).
 
 ## Documentation
 
-Full documentation is available at **[docs.reader.dev](https://docs.reader.dev)**, including guides for scraping, crawling, proxy configuration, browser pool management, and deployment.
+Full documentation is available at **[reader.dev/docs](https://reader.dev/docs)**, including guides for scraping, crawling, proxy configuration, browser pool management, and deployment.
 
 ### Examples
 
@@ -764,5 +739,4 @@ If you use Reader in your research or project, please cite it:
 ## Support
 
 - [GitHub Issues](https://github.com/vakra-dev/reader/issues)
-- [Documentation](https://docs.reader.dev)
-- [Discord](https://discord.gg/6tjkq7J5WV)
+- [Documentation](https://reader.dev/docs)

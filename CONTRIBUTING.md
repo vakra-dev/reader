@@ -378,9 +378,8 @@ By using Reader, you agree to the following:
 
 ## Questions?
 
-- Check the [documentation](https://docs.reader.dev)
+- Check the [documentation](https://reader.dev/docs)
 - Search [GitHub Issues](https://github.com/vakra-dev/reader/issues)
-- Ask in [Discord](https://discord.gg/6tjkq7J5WV)
 - Open a new issue or discussion
 
 Thank you for contributing!

@@ -222,10 +222,10 @@ const result = await reader.scrape({
 
 ### Proxy Tiers
 
-| Tier | When used | Credits |
-|------|-----------|---------|
-| `"standard"` | Fast, most sites | 1 per scrape |
-| `"premium"` | Anti-bot sites (Amazon, LinkedIn) | 3 per scrape |
+| Tier | When used | Cost |
+|------|-----------|------|
+| `"standard"` | Fast, most sites | Lower resource usage |
+| `"premium"` | Anti-bot sites (Amazon, LinkedIn) | Higher resource usage |
 
 
 ### Environment Variables
